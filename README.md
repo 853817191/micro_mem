@@ -107,6 +107,8 @@ micro_mem 的思路是把两者拆开——**真值用 Markdown（人和 AI 都�
 
 ## 快速开始
 
+> 需要 **Python ≥ 3.10**——源码用 `X | None` 作运行时注解（PEP 604），3.9 会在 import 阶段直接报错。
+
 ```bash
 # 1. 依赖（目前只有一个）
 python -m pip install -r requirements.txt
@@ -190,7 +192,34 @@ python distill_this_session.py confirm candidates.json
 `data/temp/distill_state.json` 记录蒸馏游标，所以**增量蒸馏不会重复提炼已经沉淀过的轮次**。
 
 > 同一个 `anchor` / `distill` / `confirm` 也可以直接用 `python src/main.py import` 批量做存量导入。
-> 本仓库**不包含**任何 Claude Code skill 定义——你可以按自己的习惯包一层 skill 或 shell 别名。
+
+### 装成 Claude Code skill
+
+上面这套流程有一份现成的 skill 定义，在 `skills/memory-knowledge/`：
+
+```bash
+# 用户级（所有项目可用）
+cp -r skills/memory-knowledge ~/.claude/skills/
+
+# 或项目级（只在该项目可用）
+mkdir -p <项目>/.claude/skills && cp -r skills/memory-knowledge <项目>/.claude/skills/
+```
+
+它把「从用户问题提取核心词 → `search` → 判断要不要 `get` → 蒸馏时先展示候选再落库」这套**判断规则**写成了模型可执行的流程，也就是核心原则里"判断归模型"的那一半。
+
+把 `bin/` 加入 PATH 后，可以直接用 `mem` 前缀调用所有命令：
+
+```bash
+# Windows（PowerShell，一次性）
+setx PATH "$env:PATH;<仓库路径>\bin"
+
+# macOS / Linux
+export PATH="<仓库路径>/bin:$PATH"
+mem search "关键词"
+mem get k-0001
+```
+
+`bin/mem.cmd`（Windows）与 `bin/mem.sh`（macOS / Linux）都用**脚本自身位置**推导仓库根，所以仓库可以放在任何位置；需要换位置时用 `MEMORY_HOME` 环境变量覆盖。skill 里不含任何个人路径或私有配置。
 
 ## 目录结构
 
@@ -213,9 +242,21 @@ micro_mem/
 │   ├── api/                    四接口：writer / reader / distiller / importer
 │   └── store/                  引擎：base（接口）+ sqlite_store（实现）
 ├── tests/run_tests.py          测试执行器
-└── web/
-    ├── index.html              可视化页面
-    └── vendor/echarts.min.js   Apache ECharts
+├── skills/
+│   └── memory-knowledge/       Claude Code skill 定义（拷到 ~/.claude/skills/ 使用）
+├── bin/
+│   ├── mem.cmd                 命令包装器（Windows）
+│   └── mem.sh                  命令包装器（macOS / Linux）
+├── examples/                   合成示例数据（虚构，可随意改删）
+│   ├── knowledge/              5 条示例知识
+│   ├── anchors/                1 个示例锚点
+│   └── README.md               示例说明
+├── web/
+│   ├── index.html              可视化页面
+│   └── vendor/echarts.min.js   Apache ECharts
+├── .github/workflows/ci.yml    CI：3.10~3.13 建库 → 载示例 → 校验检索/遍历/测试
+├── LICENSE                     Apache License 2.0
+└── NOTICE                      第三方组件归属
 ```
 
 ## 数据与隐私
