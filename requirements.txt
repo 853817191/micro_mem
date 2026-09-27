@@ -1,0 +1,5 @@
+# 依赖
+pyyaml>=6.0          # 配置读取
+# 第二批启用：
+# sqlite-vec          # 向量检索
+# 本地 embedding 模型或 API

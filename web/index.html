@@ -1,0 +1,666 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>记忆系统 · 可视化</title>
+<script src="vendor/echarts.min.js"></script>
+<style>
+  :root{
+    --bg:#f4f6fa; --card:#ffffff; --ink:#1f2430; --muted:#64748b;
+    --line:#e2e6ee; --primary:#4f46e5; --primary-soft:#eef2ff;
+    --blue:#2563eb; --green:#059669; --orange:#d97706;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:"Microsoft YaHei","PingFang SC",system-ui,sans-serif;color:var(--ink);background:var(--bg);height:100vh;display:flex;flex-direction:column;overflow:hidden;}
+
+  /* 顶部 */
+  header{display:flex;align-items:center;gap:16px;padding:12px 20px;background:var(--card);border-bottom:1px solid var(--line);flex-shrink:0;}
+  header h1{font-size:18px;color:var(--primary);white-space:nowrap;}
+  .search{flex:1;max-width:480px;display:flex;gap:8px;}
+  .search input{flex:1;padding:8px 12px;border:1px solid var(--line);border-radius:8px;font-size:14px;outline:none;}
+  .search input:focus{border-color:var(--primary);}
+  .search button{padding:8px 14px;border:none;border-radius:8px;background:var(--primary);color:#fff;cursor:pointer;font-size:14px;}
+  .search button.secondary{background:#eef2ff;color:var(--primary);border:1px solid #c7d2fe;}
+  .search button.secondary:hover{background:#e0e7ff;}
+  .stats{display:flex;gap:10px;margin-left:auto;flex-wrap:wrap;}
+  .stat{background:var(--primary-soft);color:var(--primary);padding:6px 12px;border-radius:8px;font-size:13px;font-weight:600;}
+
+  /* 主区：左面板 | 分隔 | 图谱 | 分隔 | 右面板 */
+  main{flex:1;display:flex;min-height:0;}
+  #leftPanel{width:300px;min-width:180px;max-width:600px;background:var(--card);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0;flex-shrink:0;}
+  #detailPanel{width:340px;min-width:200px;max-width:640px;border-left:1px solid var(--line);overflow-y:auto;flex-shrink:0;padding:0;}
+  #detailContent{padding:16px;}
+  #graph{flex:1;min-width:0;}
+  .resizer{width:5px;cursor:col-resize;flex-shrink:0;background:transparent;}
+  .resizer:hover,.resizer.active{background:var(--line);}
+
+  /* 图谱工具条（聚焦模式） */
+  .graph-toolbar{display:flex;align-items:center;gap:12px;padding:8px 16px;background:var(--card);border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);}
+  .toolbar-btn{padding:5px 14px;border:1px solid var(--line);border-radius:8px;background:#fff;cursor:pointer;font-size:13px;color:var(--ink);}
+  .toolbar-btn:hover{background:var(--bg);border-color:var(--primary);color:var(--primary);}
+
+  /* Tab 切换（知识 / 锚点） */
+  .tabs{display:flex;border-bottom:1px solid var(--line);}
+  .tab{flex:1;padding:10px;border:none;background:none;cursor:pointer;font-size:14px;color:var(--muted);}
+  .tab.active{color:var(--primary);font-weight:600;border-bottom:2px solid var(--primary);}
+
+  /* 左侧列表 */
+  .filters{display:flex;gap:6px;padding:10px 12px;border-bottom:1px solid var(--line);flex-wrap:wrap;}
+  .chip{padding:4px 12px;border-radius:999px;font-size:12px;cursor:pointer;border:1px solid var(--line);background:#fff;color:var(--muted);}
+  .chip.active{background:var(--primary);color:#fff;border-color:var(--primary);}
+  .list{flex:1;overflow-y:auto;padding:8px;}
+  .item{padding:10px 12px;border-radius:8px;cursor:pointer;margin-bottom:4px;border:1px solid transparent;}
+  .item:hover{background:var(--bg);}
+  .item.selected{background:var(--primary-soft);border-color:var(--primary);}
+  .item .t{font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px;}
+  .item .s{font-size:12px;color:var(--muted);margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+  .dot{width:10px;height:10px;border-radius:50%;display:inline-block;flex-shrink:0;}
+  .tag{font-size:11px;color:var(--muted);background:var(--bg);padding:1px 6px;border-radius:4px;margin-left:auto;}
+
+  /* 详情面板 */
+  .breadcrumb{display:flex;align-items:center;gap:6px;padding:10px 16px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);flex-wrap:wrap;position:sticky;top:0;background:var(--card);z-index:1;}
+  .bc-item{cursor:pointer;}
+  .bc-item:hover{color:var(--primary);text-decoration:underline;}
+  .bc-item.current{color:var(--ink);font-weight:600;cursor:default;}
+  .bc-item.current:hover{text-decoration:none;color:var(--ink);}
+  .bc-sep{color:#94a3b8;}
+  #detailPanel{padding:0;}
+  .d-head{margin-bottom:12px;}
+  .d-title{font-size:16px;font-weight:700;word-break:break-all;}
+  .d-meta{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;}
+  .d-badge{font-size:11px;padding:2px 8px;border-radius:999px;font-weight:600;}
+  .d-sec{margin-top:14px;}
+  .d-sec h4{font-size:12px;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px;}
+  .d-body{font-size:13px;line-height:1.7;background:var(--bg);padding:10px 12px;border-radius:8px;white-space:pre-wrap;word-break:break-word;}
+  .d-list{font-size:13px;}
+  .d-list .row{display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px dashed var(--line);cursor:pointer;}
+  .d-empty{color:var(--muted);text-align:center;margin-top:40px;font-size:13px;}
+  .rel{font-size:12px;padding:6px 10px;border-radius:6px;margin-bottom:4px;display:flex;gap:6px;align-items:center;cursor:pointer;}
+  .rel:hover{background:var(--bg);}
+  .rel .rtype{font-size:11px;background:var(--bg);padding:1px 6px;border-radius:4px;color:var(--muted);}
+  .rel-group-title{font-size:11px;color:var(--muted);margin:8px 0 4px;font-weight:600;}
+
+  /* 关联维护：删除按钮 / 新增关联表单 / 确认弹窗 */
+  .mini-btn{padding:2px 8px;border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--muted);cursor:pointer;font-size:11px;margin-left:6px;line-height:1.4;}
+  .mini-btn:hover{border-color:var(--primary);color:var(--primary);}
+  .mini-btn.danger:hover{border-color:#dc2626;color:#dc2626;background:#fef2f2;}
+  .rel .mini-btn{margin-left:auto;}
+  .d-list .row .mini-btn{margin-left:8px;}
+  .d-actions{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;}
+  .d-action-btn{padding:6px 12px;border-radius:8px;border:1px solid var(--line);background:#fff;font-size:13px;cursor:pointer;}
+  .d-action-btn:hover{border-color:var(--primary);color:var(--primary);}
+  .d-action-btn.danger{color:#dc2626;border-color:#fecaca;background:#fff7f7;}
+  .d-action-btn.danger:hover{background:#fef2f2;}
+  .link-form{display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap;}
+  .link-form select,.link-form input{padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:12px;outline:none;max-width:220px;background:#fff;color:var(--ink);}
+  .link-form select:focus,.link-form input:focus{border-color:var(--primary);}
+  .confirm-overlay{position:fixed;inset:0;background:rgba(15,23,42,.45);display:flex;align-items:center;justify-content:center;z-index:50;}
+  .confirm-box{background:#fff;border-radius:12px;padding:20px 24px;max-width:460px;width:92%;box-shadow:0 10px 30px rgba(0,0,0,.2);}
+  .confirm-box h3{font-size:15px;margin-bottom:8px;}
+  .confirm-box p{font-size:13px;color:var(--muted);line-height:1.6;margin-bottom:16px;word-break:break-all;white-space:pre-wrap;}
+  .confirm-actions{display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;}
+  .confirm-btn{padding:7px 16px;border-radius:8px;border:1px solid var(--line);background:#fff;cursor:pointer;font-size:13px;}
+  .confirm-btn:hover{background:var(--bg);}
+  .confirm-btn.primary{background:var(--primary);color:#fff;border-color:var(--primary);}
+  .confirm-btn.primary:hover{background:#4338ca;}
+  .confirm-btn.danger{background:#dc2626;color:#fff;border-color:#dc2626;}
+  .confirm-btn.danger:hover{background:#b91c1c;}
+  /* 锚点内容 */
+  .anchor-content{font-size:13px;line-height:1.7;background:var(--bg);padding:12px;border-radius:8px;white-space:pre-wrap;word-break:break-word;max-height:60vh;overflow-y:auto;}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🧠 记忆系统 · 可视化</h1>
+  <div class="search">
+    <input id="searchInput" placeholder="搜索知识…（如：记忆系统 / 螺旋迭代）">
+    <button onclick="doSearch()">搜索</button>
+    <button class="secondary" onclick="resetSearch()" title="清空搜索条件，显示全部知识">重置</button>
+  </div>
+  <div class="stats">
+    <span class="stat" id="statTotal">知识 0</span>
+    <span class="stat" id="statEdge">关联 0</span>
+    <span class="stat" id="statAnchor">锚点 0</span>
+  </div>
+</header>
+
+<main>
+  <aside id="leftPanel">
+    <div class="tabs">
+      <button class="tab active" id="tabKnowledge" onclick="switchTab('knowledge')">📚 知识</button>
+      <button class="tab" id="tabAnchor" onclick="switchTab('anchor')">📎 锚点</button>
+    </div>
+    <div class="filters" id="filters">
+      <span class="chip active" data-type="">全部</span>
+      <span class="chip" data-type="event">事情</span>
+      <span class="chip" data-type="method">方法</span>
+      <span class="chip" data-type="fact">常识</span>
+    </div>
+    <div class="list" id="list"></div>
+  </aside>
+  <div class="resizer" id="resizerLeft"></div>
+
+  <div style="flex:1;min-width:0;display:flex;flex-direction:column;">
+    <div class="graph-toolbar" id="graphToolbar" style="display:none;">
+      <span id="focusLabel"></span>
+      <button class="toolbar-btn" onclick="resetFocus()">⟲ 显示全部</button>
+    </div>
+    <div id="graph" style="flex:1;min-height:0;"></div>
+  </div>
+
+  <div class="resizer" id="resizerRight"></div>
+  <aside id="detailPanel">
+    <div class="breadcrumb" id="breadcrumb"></div>
+    <div id="detailContent">
+      <div class="d-empty">👈 点击图谱节点或左侧列表<br>查看知识详情与关联网络</div>
+    </div>
+  </aside>
+</main>
+
+<script>
+// ================= 配置 =================
+const TYPE_COLOR = { event: '#2563eb', method: '#059669', fact: '#d97706' };
+const TYPE_LABEL = { event: '事情', method: '方法', fact: '常识' };
+const SCOPE_LABEL = { universal: '普世', domain: '领域', personal: '个人' };
+
+let chart = null;
+let graphData = { nodes: [], edges: [] };
+let currentFilter = '';
+let currentTab = 'knowledge';
+let lastDetailId = null;   // 记录当前知识详情，供锚点视图返回
+let crumb = [{ label: '知识列表', action: backToList }];  // 面包屑路径
+
+// ================= 面包屑 =================
+function renderBreadcrumb() {
+  const el = document.getElementById('breadcrumb');
+  el.innerHTML = crumb.map((c, i) => {
+    const isLast = i === crumb.length - 1;
+    const sep = isLast ? '' : '<span class="bc-sep">›</span>';
+    return `<span class="bc-item${isLast ? ' current' : ''}" data-i="${i}">${escapeHtml(c.label)}</span>${sep}`;
+  }).join('');
+}
+document.getElementById('breadcrumb').addEventListener('click', e => {
+  const item = e.target.closest('.bc-item');
+  if (!item) return;
+  const i = parseInt(item.dataset.i);
+  if (crumb[i] && i < crumb.length - 1) crumb[i].action();
+});
+
+function backToList() {
+  crumb = [{ label: '知识列表', action: backToList }];
+  renderBreadcrumb();
+  document.getElementById('detailContent').innerHTML =
+    '<div class="d-empty">👈 点击图谱节点或左侧列表<br>查看知识详情与关联网络</div>';
+}
+
+// ================= 初始化 =================
+window.addEventListener('resize', () => chart && chart.resize());
+initResizer();
+init();
+
+async function init() {
+  chart = echarts.init(document.getElementById('graph'));
+  await Promise.all([loadGraph(), loadStats()]);
+  bindEvents();
+  renderBreadcrumb();  // 初始面包屑：知识列表
+}
+
+// ================= 数据加载 =================
+async function loadGraph() {
+  const res = await fetch('/api/graph');
+  graphData = await res.json();
+  renderGraph();
+  if (currentTab === 'knowledge') renderList();
+}
+
+async function loadStats() {
+  const res = await fetch('/api/stats');
+  const s = await res.json();
+  document.getElementById('statTotal').textContent = `知识 ${s.total}`;
+  document.getElementById('statEdge').textContent = `关联 ${s.edge_count}`;
+  document.getElementById('statAnchor').textContent = `锚点 ${s.anchor_count}`;
+}
+
+// ================= 图谱渲染 =================
+function renderGraph(nodes, links) {
+  // nodes/links 缺省用全量；聚焦时传子图
+  nodes = nodes || graphData.nodes;
+  links = links || graphData.edges;
+  // 计算节点度（关联数 → 节点大小）
+  const degree = {};
+  links.forEach(e => {
+    degree[e.source] = (degree[e.source] || 0) + 1;
+    degree[e.target] = (degree[e.target] || 0) + 1;
+  });
+  const chartNodes = nodes.map(n => ({
+    id: n.id, name: n.name, value: n.summary,
+    category: n.type,
+    symbolSize: 16 + Math.min(20, (degree[n.id] || 0) * 3),
+    itemStyle: { color: TYPE_COLOR[n.type] || '#94a3b8' },
+  }));
+  const chartLinks = links.map(e => ({
+    source: e.source, target: e.target,
+    lineStyle: { type: e.type === 'parent' ? 'solid' : 'dashed', opacity: 0.5 },
+  }));
+  chart.setOption({
+    backgroundColor: 'transparent',
+    tooltip: { formatter: p => p.dataType === 'node'
+      ? `<b>${p.data.name}</b><br>${p.data.value || ''}`
+      : '' },
+    series: [{
+      type: 'graph', layout: 'force', roam: true, draggable: true,
+      force: { repulsion: 500, edgeLength: [80, 160] },
+      label: { show: true, position: 'top', fontSize: 12, color: '#334155' },
+      categories: [
+        { name: 'event', itemStyle: { color: TYPE_COLOR.event } },
+        { name: 'method', itemStyle: { color: TYPE_COLOR.method } },
+        { name: 'fact', itemStyle: { color: TYPE_COLOR.fact } },
+      ],
+      data: chartNodes, links: chartLinks,
+      emphasis: { focus: 'adjacency', label: { show: true, fontWeight: 'bold' } },
+      lineStyle: { color: '#94a3b8' },
+    }],
+  });
+}
+
+// ================= 图谱聚焦模式 =================
+async function focusSubgraph(id) {
+  // 聚焦：调 traverse 拿 N 跳关联 → 渲染子图（避免大量数据混乱）
+  const res = await fetch('/api/traverse/' + id + '?depth=2');
+  const t = await res.json();
+  const relatedIds = new Set([id, ...(t.related || []).map(r => r.id)]);
+  const subNodes = graphData.nodes.filter(n => relatedIds.has(n.id));
+  const subLinks = graphData.edges.filter(e =>
+    relatedIds.has(e.source) && relatedIds.has(e.target));
+  renderGraph(subNodes, subLinks);
+  const tb = document.getElementById('graphToolbar');
+  tb.style.display = 'flex';
+  document.getElementById('focusLabel').textContent =
+    `聚焦：${t.start ? t.start.title : id}（2 跳 · ${subNodes.length} 节点）`;
+}
+
+function resetFocus() {
+  renderGraph();
+  document.getElementById('graphToolbar').style.display = 'none';
+}
+
+// ================= Tab 切换（知识 / 锚点） =================
+function switchTab(tab) {
+  currentTab = tab;
+  document.getElementById('tabKnowledge').classList.toggle('active', tab === 'knowledge');
+  document.getElementById('tabAnchor').classList.toggle('active', tab === 'anchor');
+  document.getElementById('filters').style.display = tab === 'knowledge' ? '' : 'none';
+  if (tab === 'anchor') loadAnchors();
+  else renderList();
+}
+
+async function loadAnchors() {
+  const list = document.getElementById('list');
+  list.innerHTML = '<div class="d-empty" style="margin-top:20px">加载中…</div>';
+  const res = await fetch('/api/anchors');
+  const anchors = await res.json();
+  if (!anchors.length) {
+    list.innerHTML = '<div class="d-empty" style="margin-top:20px">暂无锚点</div>';
+    return;
+  }
+  list.innerHTML = anchors.map(a => `
+    <div class="item" data-id="${a.id}" onclick="showAnchor('${a.id}')">
+      <div class="t">
+        <span class="dot" style="background:#94a3b8"></span>
+        ${a.id}
+      </div>
+      <div class="s">对话记录（保真，溯源）</div>
+    </div>`).join('');
+}
+
+async function showAnchor(anchorId) {
+  // 面包屑：知识列表 → [知识（若从知识进入）] → 锚点
+  crumb = [{ label: '知识列表', action: backToList }];
+  if (lastDetailId) {
+    const k = graphData.nodes.find(n => n.id === lastDetailId);
+    crumb.push({ label: k ? k.name : lastDetailId, action: () => showDetail(lastDetailId) });
+  }
+  crumb.push({ label: '锚点 ' + anchorId, action: () => showAnchor(anchorId) });
+  renderBreadcrumb();
+  const panel = document.getElementById('detailContent');
+  panel.innerHTML = '<div class="d-empty">加载中…</div>';
+  const res = await fetch('/api/anchor/' + anchorId);
+  const a = await res.json();
+  if (a.error) { panel.innerHTML = `<div class="d-empty">${a.error}</div>`; return; }
+  panel.innerHTML = `
+    <div class="d-head">
+      <div class="d-title">📎 ${a.id}</div>
+      <div class="d-meta">
+        <span class="d-badge" style="background:#94a3b8;color:#fff">锚点</span>
+        <span class="d-badge" style="background:#f1f5f9;color:#64748b">保真 · 不可变</span>
+      </div>
+    </div>
+    <div class="d-sec"><h4>对话记录</h4><div class="anchor-content">${escapeHtml(a.content)}</div></div>`;
+}
+
+// ================= 左侧列表 =================
+function renderList() {
+  const list = document.getElementById('list');
+  const nodes = currentFilter
+    ? graphData.nodes.filter(n => n.type === currentFilter)
+    : graphData.nodes;
+  list.innerHTML = nodes.map(n => `
+    <div class="item" data-id="${n.id}" onclick="focusNode('${n.id}')">
+      <div class="t">
+        <span class="dot" style="background:${TYPE_COLOR[n.type] || '#94a3b8'}"></span>
+        ${n.name}
+        <span class="tag">${TYPE_LABEL[n.type] || n.type}</span>
+      </div>
+      <div class="s">${n.summary || ''}</div>
+    </div>`).join('');
+}
+
+document.getElementById('filters').addEventListener('click', e => {
+  const chip = e.target.closest('.chip');
+  if (!chip) return;
+  document.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+  chip.classList.add('active');
+  currentFilter = chip.dataset.type;
+  renderList();
+});
+
+// ================= 交互 =================
+function bindEvents() {
+  chart.on('click', params => {
+    if (params.dataType === 'node') showDetail(params.data.id);
+  });
+}
+
+async function focusNode(id) {
+  await focusSubgraph(id);   // 图谱聚焦该节点 N 跳子图
+  showDetail(id);
+  document.querySelectorAll('.item').forEach(el => el.classList.toggle('selected', el.dataset.id === id));
+}
+
+async function showDetail(id) {
+  lastDetailId = id;   // 记录当前知识，供锚点视图返回
+  // 面包屑：知识列表 → 该知识
+  const k = graphData.nodes.find(n => n.id === id);
+  crumb = [
+    { label: '知识列表', action: backToList },
+    { label: k ? k.name : id, action: () => showDetail(id) },
+  ];
+  renderBreadcrumb();
+  const panel = document.getElementById('detailContent');
+  panel.innerHTML = '<div class="d-empty">加载中…</div>';
+  const res = await fetch('/api/node/' + id);
+  const d = await res.json();
+  if (d.error) { panel.innerHTML = `<div class="d-empty">${d.error}</div>`; return; }
+
+  panel.innerHTML = `
+    <div class="d-head">
+      <div class="d-title">${d.title}</div>
+      <div class="d-meta">
+        <span class="d-badge" style="background:${TYPE_COLOR[d.type] || '#94a3b8'};color:#fff">${TYPE_LABEL[d.type] || d.type}</span>
+        <span class="d-badge" style="background:#eef2ff;color:#4f46e5">${SCOPE_LABEL[d.scope] || d.scope}</span>
+        <span class="d-badge" style="background:#f1f5f9;color:#64748b">${d.status || 'draft'}</span>
+        <span class="d-badge" style="background:#f8fafc;color:#94a3b8">${d.id}</span>
+      </div>
+      <div class="d-actions">
+        <button class="d-action-btn danger" onclick="askDeleteNode('${d.id}')">🗑 删除节点</button>
+      </div>
+    </div>
+    <div class="d-sec"><h4>摘要</h4><div class="d-body">${d.summary || '—'}</div></div>
+    <div class="d-sec"><h4>正文</h4><div class="d-body">${d.body || '—'}</div></div>
+    <div class="d-sec"><h4>挂靠（父）</h4><div class="d-list">${fmtRefs(d.parents, 'parent', d.id)}</div></div>
+    <div class="d-sec"><h4>关联</h4><div class="d-list">${fmtRefs(d.links, 'link', d.id)}</div></div>
+    <div class="d-sec"><h4>新增关联</h4>
+      <div class="link-form">
+        <select id="linkTarget"></select>
+        <select id="linkType">
+          <option value="parent">挂靠（父）</option>
+          <option value="link">关联</option>
+        </select>
+        <button class="d-action-btn" onclick="addLink('${d.id}')">＋ 新增</button>
+      </div>
+    </div>
+    <div class="d-sec"><h4>外部锚点</h4><div class="d-list">${d.external_refs && d.external_refs.length
+      ? d.external_refs.map(r => `<div class="row"><span>${r.type}</span><span>${r.value}</span></div>`).join('')
+      : '<div class="d-empty" style="margin-top:0">—</div>'}</div></div>
+    <div class="d-sec"><h4>来源（溯源）</h4><div class="d-list" id="srcList"></div></div>
+    <div class="d-sec"><h4>关联网络</h4><div id="relNet"></div></div>`;
+
+  // 新增关联：目标节点下拉（排除当前节点）
+  document.getElementById('linkTarget').innerHTML =
+    graphData.nodes.filter(n => n.id !== d.id)
+      .map(n => `<option value="${n.id}">${escapeHtml(n.name)}（${n.id}）</option>`).join('');
+
+  // 来源（溯源）：蒸馏来源的锚点，点击查看原始对话
+  const sources = d.sources || [];
+  document.getElementById('srcList').innerHTML = sources.length
+    ? sources.map(s => {
+        const aid = (s.ref || '').replace('anchors/', '').replace('.md', '');
+        return `<div class="row" style="cursor:pointer" onclick="showAnchor('${aid}')">
+          <span>${s.type === 'conversation_distilled' ? '对话蒸馏' : '用户告知'}</span>
+          <span style="color:#94a3b8">${s.ref || '—'}</span></div>`;
+      }).join('')
+    : '<div class="d-empty" style="margin-top:0">—</div>';
+
+  // 关联网络：按跳数分组（直接关联 1 跳 / 间接关联 2 跳）
+  const tRes = await fetch('/api/traverse/' + id + '?depth=2');
+  const t = await tRes.json();
+  const direct = t.related ? t.related.filter(r => r.depth === 1) : [];
+  const indirect = t.related ? t.related.filter(r => r.depth === 2) : [];
+  let html = '';
+  if (direct.length) {
+    html += `<div class="rel-group-title">直接关联（1 跳）</div>` +
+      direct.map(r => relRow(r, id)).join('');
+  }
+  if (indirect.length) {
+    html += `<div class="rel-group-title">间接关联（2 跳）</div>` +
+      indirect.map(r => relRow(r, id)).join('');
+  }
+  if (!html) html = '<div class="d-empty" style="margin-top:0">无关联</div>';
+  document.getElementById('relNet').innerHTML = html;
+}
+
+function relRow(r, fromId) {
+  return `<div class="rel" onclick="focusNode('${r.id}')">
+    <span class="dot" style="background:${TYPE_COLOR[r.type] || '#94a3b8'}"></span>
+    <span>${escapeHtml(r.title)}</span>
+    <span class="rtype">${r.edge}</span>
+    <span class="mini-btn danger" title="删除该关联" onclick="event.stopPropagation();askDeleteLink('${fromId}','${r.id}','${r.edge}')">✕</span>
+  </div>`;
+}
+
+function fmtRefs(ids, edgeType, fromId) {
+  if (!ids || !ids.length) return '<div class="d-empty" style="margin-top:0">—</div>';
+  const map = Object.fromEntries(graphData.nodes.map(n => [n.id, n.name]));
+  return ids.map(id => `<div class="row" onclick="focusNode('${id}')">
+      <span>${map[id] || id}</span><span style="color:#94a3b8">${id}</span>
+      <span class="mini-btn danger" title="删除该关联" onclick="event.stopPropagation();askDeleteLink('${fromId}','${id}','${edgeType}')">✕</span></div>`).join('');
+}
+
+// ================= 关联维护 / 节点删除（写操作） =================
+function nodeName(id) {
+  const n = graphData.nodes.find(x => x.id === id);
+  return n ? n.name : id;
+}
+function edgeTypeLabel(et) {
+  return et === 'parent' ? '挂靠（父）' : '关联';
+}
+
+// 通用确认弹窗：buttons = [{label, value, danger?, primary?}]，点遮罩/取消返回 null
+function showConfirm({ title, message, buttons }) {
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.className = 'confirm-overlay';
+    overlay.innerHTML = `
+      <div class="confirm-box">
+        <h3>${escapeHtml(title)}</h3>
+        <p>${escapeHtml(message)}</p>
+        <div class="confirm-actions">${buttons.map((b, i) =>
+          `<button class="confirm-btn ${b.danger ? 'danger' : b.primary ? 'primary' : ''}" data-i="${i}">${escapeHtml(b.label)}</button>`
+        ).join('')}</div>
+      </div>`;
+    overlay.addEventListener('click', e => {
+      const btn = e.target.closest('.confirm-btn');
+      if (!btn) {
+        if (e.target === overlay) { overlay.remove(); resolve(null); }
+        return;
+      }
+      overlay.remove();
+      resolve(buttons[parseInt(btn.dataset.i)].value);
+    });
+    document.body.appendChild(overlay);
+  });
+}
+
+async function refreshGraphAndDetail(id) {
+  await loadGraph();
+  await loadStats();
+  if (id && graphData.nodes.some(n => n.id === id)) showDetail(id);
+  else backToList();
+}
+
+// 删除两个节点之间的边
+async function askDeleteLink(fromId, toId, edgeType) {
+  const ok = confirm(`确认删除「${nodeName(fromId)}」→「${nodeName(toId)}」的「${edgeTypeLabel(edgeType)}」关系？`);
+  if (!ok) return;
+  const res = await fetch('/api/link/delete', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ from_id: fromId, to_id: toId, edge_type: edgeType }),
+  });
+  const r = await res.json();
+  if (!r.ok) { alert('删除失败：' + (r.error || '未知错误')); return; }
+  if (r.deleted === false) { alert('未找到该关联，可能已被删除'); }
+  await refreshGraphAndDetail(fromId);
+}
+
+// 两个节点之间新增边
+async function addLink(fromId) {
+  const toId = document.getElementById('linkTarget').value;
+  const edgeType = document.getElementById('linkType').value;
+  if (!toId) { alert('请选择目标节点'); return; }
+  const ok = confirm(`确认新增「${nodeName(fromId)}」→「${nodeName(toId)}」的「${edgeTypeLabel(edgeType)}」关系？`);
+  if (!ok) return;
+  const res = await fetch('/api/link/add', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ from_id: fromId, to_id: toId, edge_type: edgeType }),
+  });
+  const r = await res.json();
+  if (!r.ok) { alert('新增失败：' + (r.error || '未知错误')); return; }
+  await refreshGraphAndDetail(fromId);
+}
+
+// 删除节点：两个选项（只删本节点 / 本节点+直接关联节点）
+async function askDeleteNode(id) {
+  const choice = await showConfirm({
+    title: '删除节点',
+    message: `选择删除方式：\n「${nodeName(id)}」（${id}）`,
+    buttons: [
+      { label: '只删本节点', value: 'self', danger: true },
+      { label: '本节点+直接关联节点', value: 'cascade', danger: true },
+      { label: '取消', value: null },
+    ],
+  });
+  if (choice === 'self') {
+    const yes = await showConfirm({
+      title: '确认删除',
+      message: `确认删除节点「${nodeName(id)}」？\n其所有关联边与外部锚点将一并删除，此操作不可恢复。`,
+      buttons: [{ label: '确认删除', value: true, danger: true }, { label: '取消', value: false }],
+    });
+    if (yes) await doDeleteNode(id, false);
+  } else if (choice === 'cascade') {
+    const tRes = await fetch('/api/traverse/' + id + '?depth=1');
+    const t = await tRes.json();
+    const related = (t.related || []).filter(r => r.depth === 1);
+    const names = related.map(r => r.title).slice(0, 6).join('、') + (related.length > 6 ? '…' : '');
+    const yes = await showConfirm({
+      title: '确认级联删除',
+      message: `确认删除「${nodeName(id)}」及其 ${related.length} 个直接关联节点？\n将删除：${names || '—'}\n此操作不可恢复。`,
+      buttons: [{ label: '确认删除', value: true, danger: true }, { label: '取消', value: false }],
+    });
+    if (yes) await doDeleteNode(id, true);
+  }
+}
+
+async function doDeleteNode(id, cascade) {
+  const res = await fetch('/api/node/delete', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id, cascade }),
+  });
+  const r = await res.json();
+  if (!r.ok) { alert('删除失败：' + (r.error || '未知错误')); return; }
+  const scope = cascade ? `（含 ${r.deleted.length - 1} 个直接关联节点）` : '';
+  alert(`已删除 ${r.deleted.length} 个节点${scope}\n移除 ${r.removed_edges} 条边、${r.removed_refs} 个外部锚点。`);
+  await refreshGraphAndDetail(null);
+}
+
+// ================= 搜索 =================
+async function doSearch() {
+  const q = document.getElementById('searchInput').value.trim();
+  if (!q) return;
+  switchTab('knowledge');
+  const res = await fetch('/api/search?q=' + encodeURIComponent(q));
+  const hits = await res.json();
+  const list = document.getElementById('list');
+  currentFilter = '';
+  document.querySelectorAll('.chip').forEach(c => c.classList.toggle('active', !c.dataset.type));
+  if (!hits.length) {
+    list.innerHTML = '<div class="d-empty">无命中</div>';
+    return;
+  }
+  list.innerHTML = hits.map(h => `
+    <div class="item" data-id="${h.id}" onclick="focusNode('${h.id}')">
+      <div class="t">
+        <span class="dot" style="background:${TYPE_COLOR[h.type] || '#94a3b8'}"></span>
+        ${h.title}
+        <span class="tag">${TYPE_LABEL[h.type] || h.type}</span>
+      </div>
+      <div class="s">${h.summary || ''}</div>
+    </div>`).join('');
+}
+
+// ================= 重置搜索 =================
+function resetSearch() {
+  document.getElementById('searchInput').value = '';   // 清空搜索框
+  switchTab('knowledge');                               // 切回知识列表
+  currentFilter = '';                                   // 清除过滤
+  document.querySelectorAll('.chip').forEach(c => c.classList.toggle('active', !c.dataset.type));
+  renderList();                                         // 显示全部知识
+  resetFocus();                                         // 图谱恢复全量
+}
+
+// ================= 拖拽调整宽度 =================
+function initResizer() {
+  initResizerOne('resizerLeft', 'leftPanel', 1);
+  initResizerOne('resizerRight', 'detailPanel', -1);
+}
+
+function initResizerOne(resizerId, panelId, dir) {
+  const resizer = document.getElementById(resizerId);
+  const panel = document.getElementById(panelId);
+  resizer.addEventListener('mousedown', e => {
+    e.preventDefault();
+    resizer.classList.add('active');
+    const startX = e.clientX;
+    const startW = panel.offsetWidth;
+    const move = ev => {
+      const w = startW + (ev.clientX - startX) * dir;
+      panel.style.width = Math.max(180, Math.min(640, w)) + 'px';
+    };
+    const up = () => {
+      resizer.classList.remove('active');
+      document.removeEventListener('mousemove', move);
+      document.removeEventListener('mouseup', up);
+    };
+    document.addEventListener('mousemove', move);
+    document.addEventListener('mouseup', up);
+  });
+}
+
+// ================= 工具 =================
+function escapeHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+</script>
+</body>
+</html>

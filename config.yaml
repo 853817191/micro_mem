@@ -1,0 +1,5 @@
+# 记忆/知识管理系统 · 配置
+network_store: sqlite          # 引擎：sqlite（默认）| neo4j | memory
+data_dir: ./data               # 数据根目录（相对项目根解析，勿依赖工作目录）
+embedding_model: bge-m3        # 向量模型（第二批启用）
+embedding_dim: 1024            # 向量维度 N
