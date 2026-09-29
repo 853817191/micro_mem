@@ -110,7 +110,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_rebuild.set_defaults(func=cmd_rebuild)
 
     p_create = sub.add_parser("create", help="收录一条知识")
-    p_create.add_argument("--type", required=True, help="event|method|fact")
+    p_create.add_argument("--type", required=True, help="event|model|fact|method")
     p_create.add_argument("--scope", required=True, help="universal|domain|personal")
     p_create.add_argument("--title", required=True, help="标题")
     p_create.add_argument("--summary", default="", help="判断用摘要")

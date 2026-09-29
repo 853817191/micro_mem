@@ -34,7 +34,7 @@ mem search --multi "<核心词1 核心词2>"   # 多关键词一次融合；Bash
 - **提取核心词**：从用户问题提取 2-3 个核心业务词，去掉停用词（记得/之前/讨论/那个/我们/的事情 等）和修饰词
   - 例："记得我们之前讨论的记忆与知识库的讨论吗" → 核心词「记忆 知识库」
 - **多路检索**：**一次 `--multi` 全词**（空格分隔）——内部逐词双路召回 + 跨词 RRF 融合，多词同时命中的知识自动前置、不要求词连续出现；无需多次跑命令
-- 返回候选：`id / title / summary / type（event|method|fact）/ scope`
+- 返回候选：`id / title / summary / type（event|model|fact|method）/ scope`
 - **无命中时依次尝试**：
   1. 换同义词 / 相近词（如"知识库"→"知识管理"）
   2. 放宽词（用更短的核心词，如"记忆系统"→"记忆"）
@@ -51,15 +51,20 @@ mem get <id>
 
 ## 二、蒸馏对话为知识
 
+> **蒸馏前必读同目录三份规范**：先读 `DISTILL_GUIDE.md`（共用篇：type 四分类、主副交给边、title/summary/body 写法、去重、候选格式），再按场景选读 `DISTILL_EVENT.md`（事件模式：先识事件、过程模板、产树）或 `DISTILL_DOMAIN.md`（领域模式：先识领域、领域模板、产网）。
+
 当用户说"帮我蒸馏"或要求沉淀一段对话时：
 
 ### 流程
+0. **先判断模式**：这段对话围绕的是「一件事」（事件模式）还是「一个领域」（领域模式）？见 `DISTILL_EVENT.md` / `DISTILL_DOMAIN.md` 的「一句话定位」。
 1. **读取对话**：
    - 当前上下文对话：直接用（本次会话内容）
    - 历史锚点：`Read <MEMORY_HOME>/data/anchors/s-*.md`
-2. **检索相关主题（挂靠准备）**：对要沉淀的知识，**先 search 知识库**找相关主题/总结点（用核心词检索，如"Nginx 反向代理"）；命中则把主题 id 记入候选的 `suggested_parents`
-3. **AI 提炼候选**：读对话 → 按下方 JSON 格式产出候选清单 → **同类知识填 `suggested_parents` 指向已有主题** → 写入
-   `<MEMORY_HOME>/data/temp/candidates.json`
+2. **检索相关主题（挂靠准备）**：对要沉淀的知识，**先 search 知识库**找相关主题/已有节点；命中则把 id 记入候选的 `suggested_parents` / `suggested_links`
+3. **AI 提炼候选**：
+   - 事件模式：**先立主事件（第一条 event）→ 再拆环节挂靠**（环节 `suggested_parents` 指向主事件）
+   - 领域模式：**先立领域根（model）→ 再拆子网**（子节点 `suggested_parents` 挂根/子领域，跨领域用 `suggested_links`）
+   - 按下方 JSON 格式产出候选清单 → 写入 `<MEMORY_HOME>/data/temp/candidates.json`
 4. **用户 review**：展示候选清单，用户标注 keep / edit / reject（改 decision 字段）
 5. **确认落库**：
    ```
@@ -78,7 +83,7 @@ mem confirm <candidates.json>  # 落库：幂等去重 + 溯源校验 + 回写�
 ```json
 [
   {
-    "type": "event | method | fact",
+    "type": "event | model | fact | method",
     "scope": "universal | domain | personal",
     "title": "知识标题",
     "summary": "判断用摘要（3~5 句）",
@@ -86,7 +91,8 @@ mem confirm <candidates.json>  # 落库：幂等去重 + 溯源校验 + 回写�
     "suggested_parents": ["k-0004"],     // 挂靠建议（可空）
     "suggested_links": ["k-0005"],       // 关联建议（可空）
     "sources": [{"type": "conversation_distilled", "ref": "anchors/s-xxx.md"}],
-    "decision": "keep | edit | reject"
+    "decision": "keep | edit | reject",
+    "edit_id": ""                        // 仅 decision=edit 时填：指向要更新的知识 id
   }
 ]
 ```

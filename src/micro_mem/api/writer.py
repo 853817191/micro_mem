@@ -8,6 +8,8 @@ import os
 import re
 from datetime import datetime
 
+import yaml
+
 from ..common.config import Config
 from ..domain.types import (
     EdgeType,
@@ -177,41 +179,27 @@ class MemoryWriter:
         return os.path.join("knowledge", f"{k.id}_{safe_title}.md")
 
     def _write_md_file(self, k: Knowledge) -> None:
-        """写真值文件：frontmatter（全部元数据）+ 正文。"""
+        """写真值文件：frontmatter（全部元数据，yaml 序列化保证冒号/引号等正确转义）+ 正文。"""
         path = os.path.join(self.config.data_dir, self._file_path(k))
-        lines = [
-            "---",
-            f"id: {k.id}",
-            f"type: {k.type.value}",
-            f"scope: {k.scope.value}",
-            f"title: {k.title}",
-            f"summary: {k.summary or ''}",
-        ]
-        if k.sources:
-            lines.append("sources:")
-            for s in k.sources:
-                lines.append(f"  - type: {s.type.value}")
-                if s.ref:
-                    lines.append(f"    ref: {s.ref}")
-        else:
-            lines.append("sources: []")
-        lines.append(f"parents: {list(k.parents)}")
-        lines.append(f"links: {list(k.links)}")
-        if k.external_refs:
-            lines.append("external_refs:")
-            for r in k.external_refs:
-                lines.append(f"  - type: {r.type.value}")
-                lines.append(f"    value: {r.value}")
-        lines.append(f"status: {k.status.value}")
-        lines.append(f"created: {k.created}")
-        lines.append(f"updated: {k.updated}")
-        lines.append("---")
-        lines.append("")
-        lines.append(k.body or "")
-
+        meta = {
+            "id": k.id,
+            "type": k.type.value,
+            "scope": k.scope.value,
+            "title": k.title,
+            "summary": k.summary or "",
+            "sources": [{"type": s.type.value, "ref": s.ref} for s in (k.sources or [])],
+            "parents": list(k.parents or []),
+            "links": list(k.links or []),
+            "external_refs": [{"type": r.type.value, "value": r.value} for r in (k.external_refs or [])],
+            "status": k.status.value,
+            "created": k.created,
+            "updated": k.updated,
+        }
+        fm = yaml.safe_dump(meta, allow_unicode=True, sort_keys=False)
+        content = f"---\n{fm}---\n\n{k.body or ''}"
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
-            f.write("\n".join(lines))
+            f.write(content)
 
     def _sync_indexes(self, k: Knowledge) -> None:
         """同步索引：nodes + FTS + 向量（rowid 对齐由引擎内部完成，业务层不感知）。"""

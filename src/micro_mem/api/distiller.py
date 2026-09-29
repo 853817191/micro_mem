@@ -55,6 +55,9 @@ class Distiller:
         for c in candidates:
             if c.decision == Decision.REJECT:
                 continue
+            if c.decision == Decision.EDIT:
+                created_ids.append(self._apply_edit(c))  # 更新已有知识（不改 id/sources）
+                continue
             existing = self._find_existing(c)    # 1. 幂等去重
             if existing:
                 created_ids.append(existing)
@@ -114,3 +117,18 @@ class Distiller:
             self.writer.add_edge(kid, p, EdgeType.PARENT)
         for link in c.suggested_links:
             self.writer.add_edge(kid, link, EdgeType.LINK)
+
+    def _apply_edit(self, c) -> str:
+        """EDIT：更新已有知识（type/scope/title/summary/body/关联），保留 id 与 sources。"""
+        edit_id = getattr(c, "edit_id", "") or ""
+        if not edit_id:
+            raise ValueError(f"候选「{c.title}」decision=edit 但缺 edit_id")
+        if self.store.get_node(edit_id) is None:
+            raise ValueError(f"edit_id 指向不存在的节点: {edit_id}")
+        self.writer.update_knowledge(
+            edit_id,
+            type=c.type, scope=c.scope, title=c.title,
+            summary=c.summary, body=c.body,
+            parents=c.suggested_parents, links=c.suggested_links,
+        )
+        return edit_id

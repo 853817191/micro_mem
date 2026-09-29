@@ -130,12 +130,14 @@ def cmd_confirm(argv) -> None:
         parents = [main_id if p == "MAIN" else p for p in r.get("suggested_parents", [])]
         links = [main_id if link_id == "MAIN" else link_id
                  for link_id in r.get("suggested_links", [])]
+        decision = {"keep": Decision.KEEP, "edit": Decision.EDIT,
+                    "reject": Decision.REJECT}.get(r.get("decision", "keep"), Decision.KEEP)
         return DistillCandidate(
             type=KnowledgeType(r["type"]), scope=Scope(r["scope"]),
             title=r["title"], summary=r.get("summary", ""), body=r.get("body", ""),
             suggested_parents=parents, suggested_links=links,
             sources=[Source(SourceType(s["type"]), s.get("ref", "")) for s in r.get("sources", [])],
-            decision=Decision.REJECT if r["decision"] == "reject" else Decision.KEEP)
+            decision=decision, edit_id=r.get("edit_id", ""))
 
     # 第一遍：主事件（第一条）先落库；其余候选的 MAIN 占位 → main_id
     try:

@@ -135,6 +135,7 @@
     <div class="filters" id="filters">
       <span class="chip active" data-type="">全部</span>
       <span class="chip" data-type="event">事情</span>
+      <span class="chip" data-type="model">领域</span>
       <span class="chip" data-type="method">方法</span>
       <span class="chip" data-type="fact">常识</span>
     </div>
@@ -161,8 +162,8 @@
 
 <script>
 // ================= 配置 =================
-const TYPE_COLOR = { event: '#2563eb', method: '#059669', fact: '#d97706' };
-const TYPE_LABEL = { event: '事情', method: '方法', fact: '常识' };
+const TYPE_COLOR = { event: '#2563eb', model: '#7c3aed', method: '#059669', fact: '#d97706' };
+const TYPE_LABEL = { event: '事情', model: '领域', method: '方法', fact: '常识' };
 const SCOPE_LABEL = { universal: '普世', domain: '领域', personal: '个人' };
 
 let chart = null;
@@ -255,6 +256,7 @@ function renderGraph(nodes, links) {
       label: { show: true, position: 'top', fontSize: 12, color: '#334155' },
       categories: [
         { name: 'event', itemStyle: { color: TYPE_COLOR.event } },
+        { name: 'model', itemStyle: { color: TYPE_COLOR.model } },
         { name: 'method', itemStyle: { color: TYPE_COLOR.method } },
         { name: 'fact', itemStyle: { color: TYPE_COLOR.fact } },
       ],

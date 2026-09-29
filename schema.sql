@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS nodes (
   file    TEXT NOT NULL,                                   -- 指向 md 真值：knowledge/k-0003_xxx.md
   title   TEXT NOT NULL,                                   -- 标题（候选列表一眼扫）
   summary TEXT,                                            -- 判断用摘要（确认"是不是这件事"，不读全文）
-  type    TEXT NOT NULL CHECK (type IN ('event','method','fact')),
+  type    TEXT NOT NULL CHECK (type IN ('event','model','fact','method')),
   scope   TEXT NOT NULL CHECK (scope IN ('universal','domain','personal')),
   status  TEXT NOT NULL DEFAULT 'draft'
           CHECK (status IN ('draft','evolving','settled','deprecated')),

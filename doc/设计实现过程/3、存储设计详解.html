@@ -257,7 +257,7 @@ CREATE TABLE IF NOT EXISTS nodes (
   file    TEXT NOT NULL,                                 <span class="c">-- 指向 md 真值：knowledge/k-0003_xxx.md</span>
   title   TEXT NOT NULL,                                 <span class="c">-- 标题（候选列表一眼扫）</span>
   summary TEXT,                                          <span class="c">-- 判断用摘要（确认"是不是这件事"，不读全文）</span>
-  type    TEXT NOT NULL CHECK (type IN ('event','method','fact')),
+  type    TEXT NOT NULL CHECK (type IN ('event','model','fact','method')),
                                                         <span class="c">-- 认识论类型</span>
   scope   TEXT NOT NULL CHECK (scope IN ('universal','domain','personal')),
                                                         <span class="c">-- 成立范围</span>
@@ -345,7 +345,7 @@ CREATE TABLE IF NOT EXISTS external_refs (
   <h3 style="margin-top:0;">frontmatter 字段规范（md 真值契约，一次定死）</h3>
   <pre>---
 id: k-0003                    # 统一 k- 前缀 + 序号
-type: fact                    # event | method | fact
+type: fact                    # event | model | fact | method
 scope: domain                 # universal | domain | personal
 title: 需求单业务流程
 summary: 需求单完整业务流转：用户提交→服务商报价→领导审批→客户选择方案→供应商出票，含各环节细节与代码位置。
@@ -367,7 +367,7 @@ updated: 2026-08-14
   <table>
     <tr><th style="width:110px;">字段</th><th style="width:200px;">取值 / 格式</th><th>说明</th></tr>
     <tr><td>id</td><td><code>k-0003</code>（统一 k- 前缀+序号）</td><td>跨表关联主键（edges / external_refs / file 命名）</td></tr>
-    <tr><td>type</td><td>event / method / fact</td><td>认识论类型</td></tr>
+    <tr><td>type</td><td>event / model / fact / method</td><td>认识论类型</td></tr>
     <tr><td>scope</td><td>universal / domain / personal</td><td>成立范围</td></tr>
     <tr><td>title</td><td>短标题</td><td>候选列表一眼扫</td></tr>
     <tr><td>summary</td><td>3~5 句</td><td>判断用摘要（确认"是不是这件事"）</td></tr>

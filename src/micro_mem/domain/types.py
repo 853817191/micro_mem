@@ -7,10 +7,11 @@ from enum import Enum
 # ==================== 枚举 ====================
 
 class KnowledgeType(Enum):
-    """认识论类型：回答什么问题。"""
-    EVENT = "event"              # 发生了什么
-    METHOD = "method"            # 怎么办
-    FACT = "fact"                # 是什么
+    """认识论类型：回答什么问题（知识的内容形态）。"""
+    EVENT = "event"              # 发生了什么——一件事的完整过程
+    MODEL = "model"              # 这是什么系统/领域——领域模型（结构/状态机/主流程/生命周期）
+    FACT = "fact"                # 是什么（单条）——一条规则/约束/结论
+    METHOD = "method"            # 怎么办——一套做法/流程
 
 
 class Scope(Enum):
@@ -62,10 +63,12 @@ class DistillCandidate:
     def __init__(self, type: KnowledgeType, scope: Scope, title: str,
                  summary: str = "", body: str = "",
                  suggested_parents=None, suggested_links=None,
-                 sources=None, decision: Decision = Decision.KEEP):
+                 sources=None, decision: Decision = Decision.KEEP,
+                 edit_id: str = ""):
         """蒸馏候选：type/scope/title/summary/body 知识本体（AI 产出，review 可改）；
         suggested_parents/suggested_links 关联建议（AI 给出，review 可改）；
-        sources 来源；decision review 结果（KEEP/EDIT/REJECT）。"""
+        sources 来源；decision review 结果（KEEP/EDIT/REJECT）；
+        edit_id 当 decision=EDIT 时指向被更新的已有知识 id。"""
         self.type = type
         self.scope = scope
         self.title = title
@@ -75,6 +78,7 @@ class DistillCandidate:
         self.suggested_links = suggested_links or []
         self.sources = sources or []
         self.decision = decision
+        self.edit_id = edit_id
 
     def to_dict(self) -> dict:
         """转 dict（便于命令行/JSON 传递候选）。"""
@@ -88,6 +92,7 @@ class DistillCandidate:
             "suggested_links": self.suggested_links,
             "sources": [s.to_dict() for s in self.sources],
             "decision": self.decision.value,
+            "edit_id": self.edit_id,
         }
 
     @classmethod
@@ -103,6 +108,7 @@ class DistillCandidate:
             suggested_links=list(d.get("suggested_links") or []),
             sources=[Source.from_dict(s) for s in (d.get("sources") or [])],
             decision=Decision(d.get("decision", Decision.KEEP.value)),
+            edit_id=d.get("edit_id", ""),
         )
 
 

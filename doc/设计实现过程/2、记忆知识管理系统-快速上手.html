@@ -156,7 +156,7 @@
 <h2><span class="no">①</span>一句话骨架</h2>
 <p class="lead">先记住这一句话，后面所有内容都是它的展开：</p>
 <div class="card">
-  <strong>系统 = 一个锚点 ＋ 三类知识 ＋ 一张网，由四类操作驱动，形成「沉淀 → 关联 → 复用 → 再沉淀」的闭环。</strong>
+  <strong>系统 = 一个锚点 ＋ 四类知识 ＋ 一张网，由四类操作驱动，形成「沉淀 → 关联 → 复用 → 再沉淀」的闭环。</strong>
 </div>
 
 <div class="figure">
@@ -168,7 +168,7 @@
     </div>
     <div class="box" style="border-color:#bcd2fb;background:var(--blue-soft);color:var(--blue);">
       <span class="t">知识 Knowledge</span>
-      <span class="d">事情 / 经验 / 常识（type × scope）</span>
+      <span class="d">事情 / 领域 / 经验 / 常识（type × scope）</span>
     </div>
     <div class="box" style="border-color:#b3e0cf;background:var(--green-soft);color:var(--green);">
       <span class="t">网 Network</span>
@@ -193,7 +193,7 @@
   <h3 style="margin-top:0;">展开解读</h3>
   <ul>
     <li><span class="pill p-purple">锚点</span> 每次聊天的<b>完整原始记录</b>，原样保存、不改动。它是一切知识的"根"——任何抽象出来的东西都能回溯到它，所以它也是<b>纠错和可信的最终依据</b>（"权威是原文"）。</li>
-    <li><span class="pill p-blue">知识</span> 从对话中提炼出来的、或你主动告诉 AI 的<b>可复用内容</b>。不是一条条的聊天记录，而是"发生过什么 / 怎么办 / 是什么"这类真正有价值的东西。</li>
+    <li><span class="pill p-blue">知识</span> 从对话中提炼出来的、或你主动告诉 AI 的<b>可复用内容</b>。不是一条条的聊天记录，而是"发生过什么 / 是什么系统 / 怎么办 / 是什么"这类真正有价值的东西。</li>
     <li><span class="pill p-green">网</span> 知识不是孤立的——事情、经验、常识之间通过<b>关联</b>互相连接，由一件事可以牵出相关的事。网管"谁连谁"，具体语义放在知识内容里。</li>
     <li><span class="pill p-blue">四操作</span> 是让系统转起来的<b>四个动作</b>：记忆（存原话）、蒸馏（提炼知识）、收录（你告知）、关联（建立连接）。</li>
   </ul>
@@ -228,7 +228,7 @@
       <div class="l-label">存储层</div>
       <div class="l-body"><div class="items">
         <span class="mini" style="border-color:#c3b3ee;color:var(--purple);">锚点 · 对话记录</span>
-        <span class="mini" style="border-color:#bcd2fb;color:var(--blue);">知识 · 事情/经验/常识</span>
+        <span class="mini" style="border-color:#bcd2fb;color:var(--blue);">知识 · 事情/领域/经验/常识</span>
         <span class="mini" style="border-color:#b3e0cf;color:var(--green);">网 · 关联边</span>
       </div></div>
     </div>
@@ -285,7 +285,7 @@
       <div class="body">
         <code><span class="k">content</span>  : 知识本身（因类型而异）</code>
         <code><span class="k">sources</span> : List&lt;Source&gt;（可扩展接口）</code>
-        <code><span class="k">type</span>    : EVENT | METHOD | FACT</code>
+        <code><span class="k">type</span>    : EVENT | MODEL | METHOD | FACT</code>
         <code><span class="k">scope</span>   : UNIVERSAL | DOMAIN | PERSONAL</code>
         <code><span class="k">parent</span>  : 可挂靠多个父节点（DAG）</code>
       </div>
@@ -309,7 +309,7 @@
     <tr>
       <td><b>FACT</b><br><small>是什么</small></td>
       <td class="hl"><b>常识</b><br>中国 34 省级行政区</td>
-      <td class="hl"><b>共识</b><br>XxxController 是需求单入口<br>需求单业务流程</td>
+      <td class="hl"><b>共识</b><br>XxxController 是需求单入口</td>
       <td>个人事实<br>我在订前团队做后端</td>
     </tr>
     <tr>
@@ -324,8 +324,14 @@
       <td class="hl"><b>事情</b><br>上周完成需求单 XX 新增字段的开发</td>
       <td>个人经历<br>某次我想通了"知识维度化"</td>
     </tr>
+    <tr>
+      <td><b>MODEL</b><br><small>这是什么系统/领域</small></td>
+      <td>通用结构模式<br>（状态机 / 主流程模板）</td>
+      <td class="hl"><b>领域模型</b><br>需求单业务流程<br>国际机票下单流程</td>
+      <td>个人领域理解<br>（罕见，多并入个人习惯）</td>
+    </tr>
   </table>
-  <p style="font-size:13px;color:var(--muted);">一句话记法：<b>事情 = 发生了什么，经验 = 怎么办，常识 = 是什么（普世），共识 = 是什么（项目组内）。</b>新差异 = 加维度值，而不是无限加类别。</p>
+  <p style="font-size:13px;color:var(--muted);">一句话记法：<b>事情 = 发生了什么，领域 = 这是什么系统，经验 = 怎么办，常识 = 是什么（普世），共识 = 是什么（项目组内）。</b>新差异 = 加维度值，而不是无限加类别。</p>
 </div>
 
 <div class="card">
@@ -356,7 +362,7 @@
     </div>
     <div class="arrow" style="align-self:center;">→</div>
     <div class="step" style="border-color:#bcd2fb;background:var(--blue-soft);color:var(--blue);">
-      <b>③ 蒸馏 / 收录</b><br><small>你说"帮我蒸馏"<br>→ 事情 / 经验 / 共识</small>
+      <b>③ 蒸馏 / 收录</b><br><small>你说"帮我蒸馏"<br>→ 事情 / 领域 / 经验 / 共识</small>
     </div>
     <div class="arrow" style="align-self:center;">→</div>
     <div class="step" style="border-color:#b3e0cf;background:var(--green-soft);color:var(--green);">
@@ -393,7 +399,7 @@
     <li>你告诉 AI："需求单业务流程是：用户提交需求单 → 服务商报价 → 领导审批 → 客户选方案 → 供应商出票，里面有很多细节。"</li>
     <li><span class="pill p-blue">收录</span>触发 → 生成一条知识：
       <code style="display:block;background:var(--bg);border-radius:6px;padding:6px 10px;margin:6px 0;font-size:13px;">
-        类型=FACT · 范围=DOMAIN（共识）· 来源=UserDeclared · 内容=需求单业务流程
+        类型=MODEL · 范围=DOMAIN（领域模型）· 来源=UserDeclared · 内容=需求单业务流程
       </code>
     </li>
     <li>流程是<b>层级结构</b>：总流程是父知识，每个环节（提交/报价/审批/选方案/出票）是子知识，<b>挂靠</b>在父知识下面；执行<b>顺序写在父知识内容里</b>（①提交→②报价→③审批→…）。</li>
@@ -419,9 +425,10 @@
     <tr><th style="width:170px;">术语</th><th>含义</th></tr>
     <tr><td><span class="pill p-purple">锚点 Anchor</span></td><td>对话原始记录，保真、不可变，一切知识的可溯源根</td></tr>
     <tr><td><span class="pill p-blue">事情 Event</span></td><td>type=EVENT，一次具体发生的事，带情境与时间</td></tr>
+    <tr><td><span class="pill p-blue">领域模型 Model</span></td><td>type=MODEL，描述一个系统/领域的结构、状态机、主流程、生命周期</td></tr>
     <tr><td><span class="pill p-blue">经验 Experience</span></td><td>type=METHOD，可复用的方法/流程，来源可为蒸馏或告知</td></tr>
     <tr><td><span class="pill p-blue">常识 Common Sense</span></td><td>type=FACT × scope=UNIVERSAL，普世事实</td></tr>
-    <tr><td><span class="pill p-blue">共识 Consensus</span></td><td>type=FACT/METHOD × scope=DOMAIN，项目组内达成的一致认知（代码、业务流程、约定）</td></tr>
+    <tr><td><span class="pill p-blue">共识 Consensus</span></td><td>type=FACT/METHOD × scope=DOMAIN，项目组内达成的一致认知（代码、约定、规则）</td></tr>
     <tr><td><span class="pill p-green">网 Network</span></td><td>知识节点 + 关联边；网管结构，内容管语义</td></tr>
     <tr><td><span class="pill p-blue">记忆</span></td><td>操作：对话 → 锚点（自动保真）</td></tr>
     <tr><td><span class="pill p-blue">蒸馏</span></td><td>操作：锚点/解决过程 → 事情/经验（第一阶段手动）</td></tr>

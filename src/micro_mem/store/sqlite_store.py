@@ -172,9 +172,15 @@ class SqliteNetworkStore(NetworkStore):
 
     def _search_like(self, query: str, limit: int, type_filter: str,
                      scope_filter: str) -> list[NodeRecord]:
-        """LIKE 兜底：title/summary 包含查询词（覆盖 2 字词）。"""
+        """LIKE 兜底：title/summary/body 包含查询词（覆盖 <3 字中文词）。
+
+        body 全文只在 FTS 索引副本（nodes_fts）里、nodes 表无 body 列，
+        故 body 单独从 nodes_fts JOIN nodes 查，补齐 2 字正文词的召回。
+        """
+        pattern = f"%{query}%"
+        # 1) nodes 表：title / summary（summary 不在 FTS，只能在此查）
         sql = "SELECT rowid, * FROM nodes WHERE (title LIKE ? OR summary LIKE ?)"
-        params: list = [f"%{query}%", f"%{query}%"]
+        params: list = [pattern, pattern]
         if type_filter:
             sql += " AND type=?"
             params.append(type_filter)
@@ -184,6 +190,20 @@ class SqliteNetworkStore(NetworkStore):
         sql += " LIMIT ?"
         params.append(limit)
         rows = self._conn.execute(sql, params).fetchall()
+        # 2) nodes_fts 表：body（补正文里的 2 字词；JOIN nodes 取元数据 + type/scope 过滤）
+        if len(rows) < limit:
+            bsql = ("SELECT n.rowid, n.* FROM nodes n "
+                    "JOIN nodes_fts f ON f.rowid = n.rowid WHERE f.body LIKE ?")
+            bparams: list = [pattern]
+            if type_filter:
+                bsql += " AND n.type=?"
+                bparams.append(type_filter)
+            if scope_filter:
+                bsql += " AND n.scope=?"
+                bparams.append(scope_filter)
+            bsql += " LIMIT ?"
+            bparams.append(limit - len(rows))
+            rows += self._conn.execute(bsql, bparams).fetchall()
         return [self._row_to_node(r) for r in rows]
 
     def traverse(self, start_id: str, depth: int = 2,
