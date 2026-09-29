@@ -1,0 +1,41 @@
+doc/设计实现过程/1、设计推演全过程.html
+  s_97f5f000893880::t_d65dbe9f7f8aa7 334
+tests/test_writer.py
+  s_97f5f000893880::t_853f6129ac6e88 5
+  s_97f5f000893880::t_70942346ca164a 68-82
+web/index.html
+  s_97f5f000893880::t_c0b2cc32349119 166
+  s_97f5f000893880::t_5c9ed9fcc404e6 137
+doc/设计实现过程/5、接口规范与实现指南.html
+  s_97f5f000893880::t_3885827b7f2527 353
+  s_97f5f000893880::t_347e2d91d0e8db 96
+doc/设计实现过程/2、记忆知识管理系统-快速上手.html
+  s_97f5f000893880::t_3054aa8f830eca 171
+  s_97f5f000893880::t_d9e19da42e3b8f 197
+  s_97f5f000893880::t_d380d11a3df9de 334
+  s_97f5f000893880::t_7e7c7dad77f6df 365
+  s_97f5f000893880::t_3a940eb01d5c3a 416
+doc/设计实现过程/3、存储设计详解.html
+  s_97f5f000893880::t_2312a3c581672d 427
+src/micro_mem/api/writer.py
+  s_97f5f000893880::t_84dea3c90d3273 14
+  s_97f5f000893880::t_36bb24f19235de 317,322-334
+  s_97f5f000893880::t_077acfbfe92b04 22-23
+  s_97f5f000893880::t_deb6d33a098067 283,285-286,296-300
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.45-trip",
+  "base_commit_sha": "232055c6cefae7c94a21e7e7d944fe82ad9ea12e",
+  "prompts": {},
+  "sessions": {
+    "s_97f5f000893880": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f9b4a843-f7d1-4178-ab7f-8c6328fdeabd",
+        "model": "deepseek-v4-pro-202606"
+      },
+      "human_author": "853817191 <853817191@qq.com>"
+    }
+  }
+}
