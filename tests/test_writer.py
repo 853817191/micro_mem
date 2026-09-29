@@ -2,7 +2,7 @@
 import os
 
 from micro_mem.api.reader import MemoryReader
-from micro_mem.domain.types import EdgeType, RefType
+from micro_mem.domain.types import EdgeType, RefType, Source, SourceType
 
 
 def test_w1_create_knowledge_basic(writer, store, config, mk):
@@ -65,3 +65,18 @@ def test_w8_add_remove_external_ref(writer, store, mk):
     assert ("idev", "idev-123") in store.get_external_refs(kid), "外部锚点未加"
     writer.remove_external_ref(kid, RefType.IDEV, "idev-123")
     assert ("idev", "idev-123") not in store.get_external_refs(kid), "外部锚点未删"
+
+
+def test_w9_update_preserves_sources(writer, reader, mk):
+    """回归：update 重写 md 时必须从旧 md 回读 sources，不能清空（锚归原文）。
+
+    根因：writer._build_knowledge_from_store 原先漏传 sources（默认 None→[]），
+    edit 重写 md 会把溯源清空。修复后与 reader 对齐，从旧 md frontmatter 回读。
+    """
+    kid = mk("溯源保留测试", sources=[
+        Source(SourceType.CONVERSATION_DISTILLED, "anchors/s-20260929-002.md")])
+    writer.update_knowledge(kid, title="溯源保留测试-改后")
+    k = reader.get(kid)
+    assert k.sources, "update 后 sources 被清空"
+    assert k.sources[0].ref == "anchors/s-20260929-002.md", "sources.ref 丢失"
+    assert k.sources[0].type == SourceType.CONVERSATION_DISTILLED, "sources.type 丢失"

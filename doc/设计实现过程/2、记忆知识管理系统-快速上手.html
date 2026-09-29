@@ -168,7 +168,7 @@
     </div>
     <div class="box" style="border-color:#bcd2fb;background:var(--blue-soft);color:var(--blue);">
       <span class="t">知识 Knowledge</span>
-      <span class="d">事情 / 领域 / 经验 / 常识（type × scope）</span>
+      <span class="d">事件 / 领域 / 方法 / 常识（type × scope）</span>
     </div>
     <div class="box" style="border-color:#b3e0cf;background:var(--green-soft);color:var(--green);">
       <span class="t">网 Network</span>
@@ -194,7 +194,7 @@
   <ul>
     <li><span class="pill p-purple">锚点</span> 每次聊天的<b>完整原始记录</b>，原样保存、不改动。它是一切知识的"根"——任何抽象出来的东西都能回溯到它，所以它也是<b>纠错和可信的最终依据</b>（"权威是原文"）。</li>
     <li><span class="pill p-blue">知识</span> 从对话中提炼出来的、或你主动告诉 AI 的<b>可复用内容</b>。不是一条条的聊天记录，而是"发生过什么 / 是什么系统 / 怎么办 / 是什么"这类真正有价值的东西。</li>
-    <li><span class="pill p-green">网</span> 知识不是孤立的——事情、经验、常识之间通过<b>关联</b>互相连接，由一件事可以牵出相关的事。网管"谁连谁"，具体语义放在知识内容里。</li>
+    <li><span class="pill p-green">网</span> 知识不是孤立的——事件、方法、常识之间通过<b>关联</b>互相连接，由一件事可以牵出相关的事。网管"谁连谁"，具体语义放在知识内容里。</li>
     <li><span class="pill p-blue">四操作</span> 是让系统转起来的<b>四个动作</b>：记忆（存原话）、蒸馏（提炼知识）、收录（你告知）、关联（建立连接）。</li>
   </ul>
   <div class="note">一句话本质：<b>这不是一个"聊天记录备份"系统，而是一个"把对话变成可复用经验"的系统。</b>锚点负责保真，知识负责价值，网负责串联。</div>
@@ -228,7 +228,7 @@
       <div class="l-label">存储层</div>
       <div class="l-body"><div class="items">
         <span class="mini" style="border-color:#c3b3ee;color:var(--purple);">锚点 · 对话记录</span>
-        <span class="mini" style="border-color:#bcd2fb;color:var(--blue);">知识 · 事情/领域/经验/常识</span>
+        <span class="mini" style="border-color:#bcd2fb;color:var(--blue);">知识 · 事件/领域/方法/常识</span>
         <span class="mini" style="border-color:#b3e0cf;color:var(--green);">网 · 关联边</span>
       </div></div>
     </div>
@@ -315,13 +315,13 @@
     <tr>
       <td><b>METHOD</b><br><small>怎么办</small></td>
       <td>普世方法论<br>TDD：先写测试再实现</td>
-      <td class="hl"><b>经验</b><br>用 AI 做需求开发的标准流程<br>OOM 排查五步法</td>
+      <td class="hl"><b>方法</b><br>用 AI 做需求开发的标准流程<br>OOM 排查五步法</td>
       <td>个人习惯<br>我提交代码前的自查清单</td>
     </tr>
     <tr>
       <td><b>EVENT</b><br><small>发生了什么</small></td>
       <td>（不存在——事件必然特定发生）</td>
-      <td class="hl"><b>事情</b><br>上周完成需求单 XX 新增字段的开发</td>
+      <td class="hl"><b>事件</b><br>上周完成需求单 XX 新增字段的开发</td>
       <td>个人经历<br>某次我想通了"知识维度化"</td>
     </tr>
     <tr>
@@ -331,7 +331,7 @@
       <td>个人领域理解<br>（罕见，多并入个人习惯）</td>
     </tr>
   </table>
-  <p style="font-size:13px;color:var(--muted);">一句话记法：<b>事情 = 发生了什么，领域 = 这是什么系统，经验 = 怎么办，常识 = 是什么（普世），共识 = 是什么（项目组内）。</b>新差异 = 加维度值，而不是无限加类别。</p>
+  <p style="font-size:13px;color:var(--muted);">一句话记法：<b>事件 = 发生了什么，领域 = 这是什么系统，方法 = 怎么办，常识 = 是什么（普世），共识 = 是什么（项目组内）。</b>新差异 = 加维度值，而不是无限加类别。</p>
 </div>
 
 <div class="card">
@@ -362,7 +362,7 @@
     </div>
     <div class="arrow" style="align-self:center;">→</div>
     <div class="step" style="border-color:#bcd2fb;background:var(--blue-soft);color:var(--blue);">
-      <b>③ 蒸馏 / 收录</b><br><small>你说"帮我蒸馏"<br>→ 事情 / 领域 / 经验 / 共识</small>
+      <b>③ 蒸馏 / 收录</b><br><small>你说"帮我蒸馏"<br>→ 事件 / 领域 / 方法 / 共识</small>
     </div>
     <div class="arrow" style="align-self:center;">→</div>
     <div class="step" style="border-color:#b3e0cf;background:var(--green-soft);color:var(--green);">
@@ -412,8 +412,8 @@
   <ol>
     <li>你新建一个会话，说："我要改需求单相关的需求。"</li>
     <li>系统沿<b>网</b>找到〔需求单业务流程〕共识节点 → 你指"我想改『领导审批』环节" → 定位到环节细节 → 沿关联下钻到审批相关代码。</li>
-    <li>AI 结合<b>上次的开发经验</b>（经验：用 AI 做需求开发的标准流程）和<b>锚点里的细节</b>，直接进入讨论，不用你再讲一遍流程。</li>
-    <li>开发完成后，这次过程<b>再沉淀</b>成新的"事情"，挂回需求单主题 → 网更密。</li>
+    <li>AI 结合<b>上次的开发经验</b>（方法：用 AI 做需求开发的标准流程）和<b>锚点里的细节</b>，直接进入讨论，不用你再讲一遍流程。</li>
+    <li>开发完成后，这次过程<b>再沉淀</b>成新的"事件"，挂回需求单主题 → 网更密。</li>
   </ol>
   <div class="note">对比你现在的痛点：<b>"每次都要重新讲一遍流程"被彻底消除</b>——因为流程已经作为共识沉淀在网里，下次自动关联。</div>
 </div>
@@ -424,15 +424,15 @@
   <table class="tbl">
     <tr><th style="width:170px;">术语</th><th>含义</th></tr>
     <tr><td><span class="pill p-purple">锚点 Anchor</span></td><td>对话原始记录，保真、不可变，一切知识的可溯源根</td></tr>
-    <tr><td><span class="pill p-blue">事情 Event</span></td><td>type=EVENT，一次具体发生的事，带情境与时间</td></tr>
+    <tr><td><span class="pill p-blue">事件 Event</span></td><td>type=EVENT，一次具体发生的事，带情境与时间</td></tr>
     <tr><td><span class="pill p-blue">领域模型 Model</span></td><td>type=MODEL，描述一个系统/领域的结构、状态机、主流程、生命周期</td></tr>
-    <tr><td><span class="pill p-blue">经验 Experience</span></td><td>type=METHOD，可复用的方法/流程，来源可为蒸馏或告知</td></tr>
+    <tr><td><span class="pill p-blue">方法 Method</span></td><td>type=METHOD，可复用的方法/流程，来源可为蒸馏或告知</td></tr>
     <tr><td><span class="pill p-blue">常识 Common Sense</span></td><td>type=FACT × scope=UNIVERSAL，普世事实</td></tr>
     <tr><td><span class="pill p-blue">共识 Consensus</span></td><td>type=FACT/METHOD × scope=DOMAIN，项目组内达成的一致认知（代码、约定、规则）</td></tr>
     <tr><td><span class="pill p-green">网 Network</span></td><td>知识节点 + 关联边；网管结构，内容管语义</td></tr>
     <tr><td><span class="pill p-blue">记忆</span></td><td>操作：对话 → 锚点（自动保真）</td></tr>
-    <tr><td><span class="pill p-blue">蒸馏</span></td><td>操作：锚点/解决过程 → 事情/经验（第一阶段手动）</td></tr>
-    <tr><td><span class="pill p-blue">收录</span></td><td>操作：你主动告知 → 经验/常识/共识（直接写入）</td></tr>
+    <tr><td><span class="pill p-blue">蒸馏</span></td><td>操作：锚点/解决过程 → 事件/方法（第一阶段手动）</td></tr>
+    <tr><td><span class="pill p-blue">收录</span></td><td>操作：你主动告知 → 方法/常识/共识（直接写入）</td></tr>
     <tr><td><span class="pill p-blue">关联</span></td><td>操作：建边挂网（挂靠/关联/溯源）</td></tr>
     <tr><td><span class="pill p-orange">确认链路</span></td><td>机械阈值 → AI 判断 → 问用户 → 回对原文（逐级收敛，原文是最终权威）</td></tr>
     <tr><td><span class="pill p-orange">CBR</span></td><td>基于案例推理：Retain 沉淀 / Retrieve 关联 / Reuse 复用 / Revise 修订——本系统的复用框架</td></tr>

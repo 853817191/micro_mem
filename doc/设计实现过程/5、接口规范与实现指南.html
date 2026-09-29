@@ -93,7 +93,7 @@
   <table>
     <tr><th style="width:120px;">概念</th><th>含义</th></tr>
     <tr><td><span class="pill p-purple">锚点</span></td><td>对话原始记录（保真、不可变）。存 anchors/ 目录 md 文件。一切知识的溯源根</td></tr>
-    <tr><td><span class="pill p-blue">知识</span></td><td>事情（发生了什么）/ 经验（怎么办）/ 常识+共识（是什么）。存 knowledge/ 目录 md + frontmatter</td></tr>
+    <tr><td><span class="pill p-blue">知识</span></td><td>事件（发生了什么）/ 方法（怎么办）/ 常识+共识（是什么）。存 knowledge/ 目录 md + frontmatter</td></tr>
     <tr><td><span class="pill p-green">网</span></td><td>知识之间的关联（挂靠/关联/溯源），SQLite 边表</td></tr>
     <tr><td><span class="pill p-slate">四操作</span></td><td>记忆（对话→锚点）· 蒸馏（对话→知识）· 收录（告知→知识）· 关联（建边）</td></tr>
     <tr><td><span class="pill p-orange">三级粒度</span></td><td>title 扫（候选列表）→ summary 判（是不是这件事）→ file 钻（细节原文）</td></tr>
@@ -350,7 +350,7 @@ ids = distiller.confirm_distill(cands)          <span class="c"># 确认的入�
 
   <h3 style="margin-top:0;">流程三：下次复用（改需求单）</h3>
   <pre>hits = reader.search("改一下审批环节")           <span class="c"># 候选（summary 判断）</span>
-rel  = reader.traverse("k-0010", 2)             <span class="c"># 父流程/代码/经验</span>
+rel  = reader.traverse("k-0010", 2)             <span class="c"># 父流程/代码/方法</span>
 full = reader.get("k-0010")                     <span class="c"># 下钻完整知识</span></pre>
 
   <h3 style="margin-top:0;">流程四：存量导入历史会话</h3>

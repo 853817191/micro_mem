@@ -11,6 +11,7 @@ from datetime import datetime
 import yaml
 
 from ..common.config import Config
+from ..common.md_parser import parse_frontmatter
 from ..domain.types import (
     EdgeType,
     ExternalRef,
@@ -18,6 +19,8 @@ from ..domain.types import (
     KnowledgeType,
     RefType,
     Scope,
+    Source,
+    SourceType,
     Status,
 )
 from ..store.base import NetworkStore, NodeRecord
@@ -277,9 +280,10 @@ class MemoryWriter:
             self.store.add_external_ref(id, r.type.value, r.value)
 
     def _rewrite_md_file(self, id: str) -> None:
-        """重写真值文件：从 store 读回完整状态重新生成 md；文件名变化时删除旧文件。
+        """重写真值文件：从 store 读回完整状态重新生成 md；文件名变化时同步 file 字段并删除旧文件。
 
-        否则同 id 会残留多个 md 文件，导致 rebuild 时 id 冲突。
+        否则同 id 会残留多个 md 文件，导致 rebuild 时 id 冲突；且 store.file 仍指向旧文件，
+        会使 reader 按旧 file 回读 sources 落空（sources 真值在 md，按 file 定位）。
         """
         rec = self.store.get_node(id)
         if rec is None:
@@ -289,6 +293,11 @@ class MemoryWriter:
         self._write_md_file(new_k)
         new_file = self._file_path(new_k)
         if new_file != old_file:
+            # 同步 store 里 file 字段为新名（否则 reader 按旧 file 读不到 sources）
+            self.store.update_node(
+                NodeRecord(id=rec.id, file=new_file, title=rec.title, summary=rec.summary,
+                           type=rec.type, scope=rec.scope, status=rec.status,
+                           created=rec.created, updated=rec.updated))
             old_path = os.path.join(self.config.data_dir, old_file)
             if os.path.exists(old_path):
                 os.remove(old_path)
@@ -305,9 +314,24 @@ class MemoryWriter:
         return Knowledge(
             type=KnowledgeType(rec.type), scope=Scope(rec.scope), title=rec.title,
             summary=rec.summary, body=self.store.get_fts_body(id),
+            sources=self._read_sources(rec.file),
             parents=parents, links=links, external_refs=refs,
             status=Status(rec.status), id=rec.id,
             created=rec.created, updated=rec.updated)
+
+    def _read_sources(self, file: str) -> list:
+        """sources 真值在 md frontmatter（不在 SQLite 索引），按 file 回读补全。
+
+        与 reader._read_sources 对齐：edit 重写 md 时，sources 需从旧 md 回读保留，
+        否则 update 会把 sources 清空（丢失溯源，违背「锚归原文」）。
+        """
+        path = os.path.join(self.config.data_dir, file)
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as f:
+                meta, _ = parse_frontmatter(f.read())
+            return [Source(SourceType(s.get("type", SourceType.CONVERSATION_DISTILLED.value)),
+                           s.get("ref", "")) for s in (meta.get("sources") or [])]
+        return []
 
     # ================= 废弃 =================
 
