@@ -1,0 +1,7 @@
+pyyaml>=6.0
+sqlite-vec>=0.1.9
+
+[dev]
+pytest>=8.0
+ruff>=0.4
+mypy>=1.8

@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>记忆/知识管理系统 · 存储设计推演全过程</title>
+<style>
+  :root{
+    --ink:#1f2430; --muted:#5b6472; --line:#d9dde5; --bg:#f4f6f9; --card:#ffffff;
+    --blue:#2563eb; --blue-soft:#eaf1ff;
+    --green:#059669; --green-soft:#e9f7f1;
+    --orange:#d97706; --orange-soft:#fdf3e3;
+    --purple:#7c3aed; --purple-soft:#f1eafe;
+    --slate:#64748b; --slate-soft:#eef2f7;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:"Microsoft YaHei","PingFang SC","Segoe UI",system-ui,sans-serif;
+    color:var(--ink);background:var(--bg);line-height:1.78;}
+  .wrap{max-width:1120px;margin:0 auto;padding:32px 20px 80px;}
+  header.hero{background:linear-gradient(135deg,#14532d,#059669 60%,#34d399);color:#fff;
+    border-radius:16px;padding:38px 42px;margin-bottom:32px;}
+  header.hero h1{margin:0 0 10px;font-size:28px;}
+  header.hero p{margin:4px 0;font-size:15px;opacity:.94;}
+  header.hero .tag{display:inline-block;margin-top:14px;padding:6px 14px;
+    background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.3);
+    border-radius:999px;font-size:14px;}
+  h2{font-size:23px;margin:54px 0 6px;padding-left:12px;border-left:4px solid var(--green);}
+  h2 .no{color:var(--green);margin-right:6px;}
+  h3{margin:20px 0 8px;font-size:17px;}
+  .lead{color:var(--muted);margin:0 0 16px;font-size:15px;}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;
+    padding:20px 24px;margin:14px 0;box-shadow:0 1px 3px rgba(16,24,40,.05);}
+  .note{background:var(--orange-soft);border:1px solid #f0d6a8;border-radius:8px;
+    padding:12px 16px;font-size:14px;color:#7a4c06;margin:12px 0;}
+  .pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap;}
+  .p-blue{background:var(--blue-soft);color:var(--blue);}
+  .p-green{background:var(--green-soft);color:var(--green);}
+  .p-orange{background:var(--orange-soft);color:var(--orange);}
+  .p-purple{background:var(--purple-soft);color:var(--purple);}
+  .p-slate{background:var(--slate-soft);color:var(--slate);}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;margin:10px 0;}
+  th,td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top;}
+  th{background:var(--bg);font-weight:600;white-space:nowrap;}
+  code{background:var(--bg);border-radius:6px;padding:2px 6px;font-family:Consolas,monospace;font-size:12.5px;}
+  ul,ol{margin:8px 0;} li{margin:4px 0;}
+  .tbl-wrap{overflow-x:auto;}
+
+  .quote{background:#f8fafc;border:1px solid var(--line);border-left:4px solid var(--blue);
+    border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:14px;}
+  .quote.ai{border-left-color:var(--green);}
+  .quote .who{font-weight:700;font-size:12px;display:block;margin-bottom:3px;}
+  .quote.user .who{color:var(--blue);} .quote.ai .who{color:var(--green);}
+  .quote .focus{display:inline-block;font-size:11px;font-weight:600;color:var(--slate);
+    background:var(--slate-soft);padding:1px 8px;border-radius:999px;margin-left:6px;}
+
+  .timeline{position:relative;margin:8px 0 0 22px;padding-left:30px;border-left:3px solid #d7dae0;}
+  .phase{position:relative;margin-bottom:34px;}
+  .phase::before{content:'';position:absolute;left:-37px;top:8px;width:16px;height:16px;
+    border-radius:50%;background:var(--green);border:3px solid #fff;box-shadow:0 0 0 2px var(--green);}
+  .phase .phase-no{position:absolute;left:-88px;top:6px;font-weight:700;color:var(--muted);font-size:14px;width:44px;text-align:right;}
+  .phase-card{border:1px solid var(--line);border-radius:12px;background:var(--card);
+    padding:20px 22px;box-shadow:0 1px 3px rgba(16,24,40,.05);}
+  .phase-title{font-size:18px;font-weight:700;margin-bottom:2px;}
+  .phase-sub{font-size:13px;color:var(--muted);margin-bottom:12px;}
+  .phase-summary{background:var(--green-soft);border:1px solid #b3e0cf;border-radius:8px;
+    padding:12px 16px;margin-top:14px;font-size:14px;color:#0b5d44;}
+  .phase-decision{background:var(--blue-soft);border:1px solid #bcd2fb;border-radius:8px;
+    padding:12px 16px;margin-top:10px;font-size:14px;color:#1e3a8a;}
+
+  .overview{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;align-items:stretch;}
+  .ov-step{flex:1;min-width:96px;border-radius:10px;padding:10px;text-align:center;font-size:12px;border:1px solid;}
+  .ov-step .t{font-weight:700;display:block;font-size:13px;}
+  .ov-step .d{font-size:11px;opacity:.8;}
+  .ov-arrow{align-self:center;color:var(--muted);font-size:15px;}
+  .foot{color:var(--muted);font-size:13px;margin-top:48px;text-align:center;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <h1>记忆/知识管理系统 · 存储设计推演全过程</h1>
+  <p>第二阶段（数据存储设计）的完整记录——从螺旋迭代方法论，到五张表 + frontmatter 规范，再到三个场景验证通过。</p>
+  <p class="tag">配合《设计推演全过程》阅读 · 这篇记录"数据是怎么存下来的"每一步决策</p>
+</header>
+
+<!-- ==================== 总览 ==================== -->
+<h2><span class="no">①</span>过程总览（9 个阶段）</h2>
+<p class="lead">主线：定方法论 → 选存储形态 → 选引擎 → 选语言 → 建表 → 两轮优化 → 深度打磨 → 场景验证。</p>
+
+<div class="card">
+  <div class="overview">
+    <div class="ov-step" style="border-color:#f0d6a8;background:var(--orange-soft);color:#7a4c06;"><span class="t">①方法论</span><span class="d">螺旋迭代·底层一次定死</span></div>
+    <div class="ov-arrow">→</div>
+    <div class="ov-step" style="border-color:#f0d6a8;background:var(--orange-soft);color:#7a4c06;"><span class="t">②存储形态</span><span class="d">按数据性质分配</span></div>
+    <div class="ov-arrow">→</div>
+    <div class="ov-step" style="border-color:#f0d6a8;background:var(--orange-soft);color:#7a4c06;"><span class="t">③引擎选型</span><span class="d">SQLite + 接口化</span></div>
+    <div class="ov-arrow">→</div>
+    <div class="ov-step" style="border-color:#cbd5e1;background:var(--slate-soft);color:var(--slate);"><span class="t">④语言</span><span class="d">Python</span></div>
+    <div class="ov-arrow">→</div>
+    <div class="ov-step" style="border-color:#b3e0cf;background:var(--green-soft);color:var(--green);"><span class="t">⑤建表</span><span class="d">五张表初版</span></div>
+    <div class="ov-arrow">→</div>
+    <div class="ov-step" style="border-color:#b3e0cf;background:var(--green-soft);color:var(--green);"><span class="t">⑥summary</span><span class="d">判断不读全文</span></div>
+    <div class="ov-arrow">→</div>
+    <div class="ov-step" style="border-color:#b3e0cf;background:var(--green-soft);color:var(--green);"><span class="t">⑦去body</span><span class="d">消除冗余</span></div>
+    <div class="ov-arrow">→</div>
+    <div class="ov-step" style="border-color:#bcd2fb;background:var(--blue-soft);color:var(--blue);"><span class="t">⑧深度打磨</span><span class="d">五张表机制</span></div>
+    <div class="ov-arrow">→</div>
+    <div class="ov-step" style="border-color:#bcd2fb;background:var(--blue-soft);color:var(--blue);"><span class="t">⑨验证</span><span class="d">三场景全覆盖</span></div>
+  </div>
+</div>
+
+<!-- ==================== 时间线 ==================== -->
+<h2><span class="no">②</span>逐阶段推演（完整对话记录）</h2>
+
+<div class="timeline">
+
+<!-- 阶段 1 -->
+<div class="phase">
+  <span class="phase-no">阶段 1</span>
+  <div class="phase-card">
+    <div class="phase-title">设计方法论 · 螺旋迭代，但底层一次定死</div>
+    <div class="phase-sub">确定"怎么设计"——业务层螺旋、底层选型不试错</div>
+
+    <div class="quote user"><span class="who">👤 用户</span>我想采用<b>螺旋迭代</b>的方式做设计：先做基础数据模型，用实际场景验证存储，再设计复用，发现问题再优化存储，再验证。<span class="focus">提出螺旋</span></div>
+    <div class="quote user"><span class="who">👤 用户</span>螺旋迭代是针对业务的，<b>这种底层的，我不建议用螺旋迭代，如果变动，影响面比较大</b>。<span class="focus">底层不迭代</span></div>
+    <div class="quote ai"><span class="who">🤖 AI</span>区分"真值 vs 索引"：真值（Markdown 格式）影响面大、一次定死；<b>网是可重建的索引，换引擎影响面被隔离</b>。真正不能变的是真值格式。<span class="focus">影响面隔离</span></div>
+
+    <div class="phase-summary"><b>对齐：</b>业务层螺旋迭代（场景驱动）；底层一次定死（真值影响面大）。</div>
+  </div>
+</div>
+
+<!-- 阶段 2 -->
+<div class="phase">
+  <span class="phase-no">阶段 2</span>
+  <div class="phase-card">
+    <div class="phase-title">存储形态 · 结构化还是非结构化？</div>
+    <div class="phase-sub">从"二选一"到"按数据性质分配"，并由第一原则驱动</div>
+
+    <div class="quote user"><span class="who">👤 用户</span>我们使用<b>结构化存储好，还是非结构化存储</b>？<span class="focus">根本选型</span></div>
+    <div class="quote ai"><span class="who">🤖 AI</span>不是二选一，是<b>按数据性质分配</b>：内容（锚点/知识正文）→ 文件非结构化；元数据（type/scope/sources）→ frontmatter 结构化；关系（网）→ 结构化。理由：你要 review（人读）、Claude Code 读文件（AI 读）、复用要图遍历（机查）。<span class="focus">混合分配</span></div>
+    <div class="quote user"><span class="who">👤 用户</span>再回到最开始的观点：要让 AI 正确想起某件事，是<b>系统检索，大模型判断</b>。<span class="focus">拉回第一原则</span></div>
+    <div class="quote ai"><span class="who">🤖 AI</span>第一原则恰好决定存储分配——<b>谁消费决定谁用什么存储</b>：系统消费的网 → 结构化（机械检索的落点）；模型/人消费的知识、锚点 → 文件。如果网不结构化，系统就没有"机械检索"的落点。<span class="focus">原则驱动</span></div>
+
+    <div class="phase-summary"><b>对齐：</b>存储形态 = 按数据性质分配 + 由"谁消费"驱动。真值 = 文件；网 = 结构化。</div>
+    <div class="phase-decision"><b>产出：</b>文件真值 + 索引增强的基调。</div>
+  </div>
+</div>
+
+<!-- 阶段 3 -->
+<div class="phase">
+  <span class="phase-no">阶段 3</span>
+  <div class="phase-card">
+    <div class="phase-title">网引擎选型 · SQLite？接口化？</div>
+    <div class="phase-sub">从"为什么 SQLite"到全选型扫描，再到接口可插拔</div>
+
+    <div class="quote user"><span class="who">👤 用户</span>网为什么要用 SQLite？优势是什么？<span class="focus">质疑</span></div>
+    <div class="quote ai"><span class="who">🤖 AI</span>SQLite 优势：图遍历（递归CTE）/组合查询/约束一致/性能。诚实边界：个人量级性能差异不大，核心在<b>查询复杂度</b>——单跳关联文件够，多跳串联要图库。<span class="focus">诚实边界</span></div>
+    <div class="quote user"><span class="who">👤 用户</span>底层的我不建议螺旋迭代……<b>除了 SQLite，还有其他选型吗</b>？<span class="focus">全选型扫描</span></div>
+    <div class="quote ai"><span class="who">🤖 AI</span>6 引擎评估：SQLite（全覆盖）/ DuckDB（向量弱）/ Neo4j（图强但重）/ LanceDB、Chroma（向量强图弱）/ 纯文件（能力有限）。<b>SQLite（FTS5 + sqlite-vec）唯一单文件零部署全覆盖</b>。<span class="focus">选型结论</span></div>
+    <div class="quote user"><span class="who">👤 用户</span>构建网、查询检索网的时候，调用的其实是<b>一个接口</b>，具体是 SQLite 实现还是 Neo4j 实现，可由配置决定。<span class="focus">接口化提案</span></div>
+    <div class="quote ai"><span class="who">🤖 AI</span>这正是端口-适配器：契约定死、实现开放。NetworkStore 接口 = 构建（rebuild/upsert）+ 检索（query/traverse/semantic）。换实现 = 新类 + 改配置，上层不动。<span class="focus">架构确认</span></div>
+
+    <div class="phase-summary"><b>对齐：</b>SQLite 默认实现；NetworkStore 接口可插拔（SQLite/Neo4j/Memory）。</div>
+  </div>
+</div>
+
+<!-- 阶段 4 -->
+<div class="phase">
+  <span class="phase-no">阶段 4</span>
+  <div class="phase-card">
+    <div class="phase-title">实现语言 · 引入 Python</div>
+    <div class="phase-sub">裸 sqlite3 CLI 做不了逻辑，需要脚本语言</div>
+
+    <div class="quote user"><span class="who">👤 用户</span>需要引入一门语言吗？比如 Python，用来跟 SQLite 交互，还是 CLI 工具直接交互？影响大吗？<span class="focus">语言选型</span></div>
+    <div class="quote ai"><span class="who">🤖 AI</span>需要 Python：裸 sqlite3 CLI 只能查表，做不了<b>重建索引（解析 frontmatter）、向量检索、图遍历</b>这些逻辑。影响可控——你机器已有 Python。封装成统一命令入口 <code>main.py rebuild/search/traverse</code>，Claude Code 只调命令。<span class="focus">结论</span></div>
+
+    <div class="phase-summary"><b>对齐：</b>工具层 = Python，统一命令入口；sqlite3 CLI 仅调试。</div>
+  </div>
+</div>
+
+<!-- 阶段 5 -->
+<div class="phase">
+  <span class="phase-no">阶段 5</span>
+  <div class="phase-card">
+    <div class="phase-title">建表 · 五张表初版 + 检索机制</div>
+    <div class="phase-sub">核心问题：节点存什么、关键词怎么快搜</div>
+
+    <div class="quote user"><span class="who">👤 用户</span>SQLite 可以存储我们的网……如何快速检索网上的节点？比如给一个关键词，如何快速搜索出这个关键词所在的节点？<span class="focus">表结构 + 检索</span></div>
+    <div class="quote ai"><span class="who">🤖 AI</span>五张表：nodes（节点）+ nodes_fts（FTS5 全文）+ nodes_vec（向量）+ edges（网）+ external_refs（外部锚点）。关键词检索 = <b>FTS5 倒排索引</b>，trigram 解决中文分词。<span class="focus">表 + FTS</span></div>
+    <div class="quote user"><span class="who">👤 用户</span>如果另外建一个索引表，专门对知识内容做关键词提取，关联 node 主键 id……效率会不会高一点？<span class="focus">自建索引想法</span></div>
+    <div class="quote ai"><span class="who">🤖 AI</span>你的想法 = <b>FTS5 的架构</b>——它就是"独立倒排索引表 + rowid 关联"，外部内容表模式连正文都不存。不用重复造轮子。<span class="focus">澄清 FTS5</span></div>
+    <div class="quote user"><span class="who">👤 用户</span>问题 1 认可，不重复造轮子。2、<b>向量解决了什么问题</b>？是检索出来的数据带权重值吗？<span class="focus">问向量</span></div>
+    <div class="quote ai"><span class="who">🤖 AI</span>向量不是"带权重"，是"<b>语义召回</b>"——FTS5 找"写了这个词的"，向量找"想表达这个意思的"（搜"内存溢出"命中"OOM 排查"）。代价：需要 embedding 服务。<span class="focus">向量澄清</span></div>
+    <div class="quote user"><span class="who">👤 用户</span><b>用，必须用。</b><span class="focus">拍板向量</span></div>
+
+    <div class="phase-summary"><b>对齐：</b>五张表 + FTS5（trigram）+ 向量必上（sqlite-vec）。</div>
+  </div>
+</div>
+
+<!-- 阶段 6 -->
+<div class="phase">
+  <span class="phase-no">阶段 6</span>
+  <div class="phase-card">
+    <div class="phase-title">Summary 优化 · 判断不读全文</div>
+    <div class="phase-sub">用户提出：检索确认阶段能不能不读 md 文件？</div>
+
+    <div class="quote user"><span class="who">👤 用户</span>检索出很多知识，需要大模型判断确认是不是这件事，这个过程能不能不读 md 文件，<b>将文件内容提取出来一部分，专门用来确认是不是对应的事情</b>？有时候文件会很大。<span class="focus">优化提案</span></div>
+    <div class="quote ai"><span class="who">🤖 AI</span>可以，而且这正好把两步法的 <b>gist 层</b>落进存储——nodes 加 summary 列，检索返回轻量字段（id/title/summary/file），模型读 summary 判断，确认后才按 file 读全文。三级粒度：<b>title 扫 → summary 判 → file 钻</b>。<span class="focus">gist 落地</span></div>
+
+    <div class="phase-summary"><b>对齐：</b>summary = 判断用摘要（3~5 句），写在 frontmatter，检索返回轻量字段。</div>
+  </div>
+</div>
+
+<!-- 阶段 7 -->
+<div class="phase">
+  <span class="phase-no">阶段 7</span>
+  <div class="phase-card">
+    <div class="phase-title">去 body 修正 · 用户发现冗余</div>
+    <div class="phase-sub">"body 只在建索引时用一次，有必要存副本吗？"——这个问题改进了设计</div>
+
+    <div class="quote user"><span class="who">👤 用户</span>node 表里为什么需要一个 Body 字段？设计的初衷是什么？<span class="focus">质疑 body</span></div>
+    <div class="quote ai"><span class="who">🤖 AI</span>body 的初衷 = 给 FTS5 全文检索提供内容源（倒排索引需要文本）。没有 body，FTS 没内容可索引。<span class="focus">解释</span></div>
+    <div class="quote user"><span class="who">👤 用户</span>那能在建立 nodes_fts 时才用一次，建完索引后 body 是不是就不需要了？<b>有必要存副本吗</b>？<span class="focus">发现冗余</span></div>
+    <div class="quote ai"><span class="who">🤖 AI</span>你说得对——<b>body 副本是冗余的</b>。正文只在建索引那一刻喂给 FTS5，来源应该是 md 文件，不必常驻 nodes。修正：nodes 去 body；FTS5 改独立表（rebuild 时从 md 读正文喂入）。<span class="focus">确认修正</span></div>
+
+    <div class="phase-summary"><b>对齐：</b>正文只在 md 文件一处（真值唯一），FTS 索引 rebuild 时从 md 读入——消除双份同步问题。</div>
+  </div>
+</div>
+
+<!-- 阶段 8 -->
+<div class="phase">
+  <span class="phase-no">阶段 8</span>
+  <div class="phase-card">
+    <div class="phase-title">深度打磨 · 五张表机制逐个讲透</div>
+    <div class="phase-sub">追问每个细节：FTS 生命周期、字段意义、rowid 关联、向量配合、external_refs</div>
+
+    <div class="quote user"><span class="who">👤 用户</span>nodes_fts 在真实的流程中，他的创建或更新逻辑是什么？<span class="focus">FTS 生命周期</span></div>
+    <div class="quote ai"><span class="who">🤖 AI</span>三个时机：rebuild（全量，扫 md 重插）、upsert（增量单条）、改版（FTS5 不支持 UPDATE，用 <b>delete + insert</b>）。正文每次从 md 读，rowid 对齐两表。<span class="focus">机制</span></div>
+    <div class="quote user"><span class="who">👤 用户</span>nodes_fts 表字段，是按照 sqlite 要求一定是这俩字段吗？<span class="focus">问字段约束</span></div>
+    <div class="quote ai"><span class="who">🤖 AI</span>不是强制的，是<b>我特意设计的</b>——FTS5 列可任意数量任意命名。选 title+body 是因为：title 覆盖标题词、body 覆盖正文细节（两个独立内容源）。trigram 是分词器选项（解决中文子串匹配）。<span class="focus">设计意图</span></div>
+    <div class="quote user"><span class="who">👤 用户</span>那从 fts 搜索出来的关键词是怎么跟 node 对应上的？<span class="focus">rowid 关联</span></div>
+    <div class="quote ai"><span class="who">🤖 AI</span>靠 <b>rowid</b>——FTS5 倒排索引存"词→rowid 列表"，检索返回 rowid，JOIN nodes 对齐。nodes 有双键：id（业务）/rowid（物理）。<span class="focus">机制</span></div>
+    <div class="quote user"><span class="who">👤 用户</span>但是我没看到 fts 表里面涉及 rowid 这个字段啊。<span class="focus">质疑</span></div>
+    <div class="quote ai"><span class="who">🤖 AI</span>对——rowid 是<b>隐式列</b>，不用也不能写在 CREATE（是保留名）。在使用时出现：INSERT 指定、SELECT 取出、JOIN 对齐。<span class="focus">隐式机制</span></div>
+    <div class="quote user"><span class="who">👤 用户</span>summary 感觉不应该放在 fts 表里面吧，会数据重复吧。<span class="focus">抓重复</span></div>
+    <div class="quote ai"><span class="who">🤖 AI</span>你抓得对，收回我上一轮"summary 进 FTS"的建议——summary 是 body 提炼，词已在 body；它只做"返回判断"不做"被检索"。FTS 列保持 title+body。<span class="focus">收回</span></div>
+    <div class="quote user"><span class="who">👤 用户</span>有 body 了为什么还需要 title？<span class="focus">追问</span></div>
+    <div class="quote ai"><span class="who">🤖 AI</span>因为 title 和 body 是<b>独立内容源</b>——正文里通常没有标题短语。搜"需求单业务流程"（完整标题）只有 title 能命中；搜"审批条件"（细节）只有 body 能命中。<span class="focus">解释</span></div>
+    <div class="quote user"><span class="who">👤 用户</span>向量表跟 fts 表是怎么配合使用的？<span class="focus">问配合</span></div>
+    <div class="quote ai"><span class="who">🤖 AI</span><b>双路召回 + 合并</b>：FTS（字面）+ 向量（语义）各自召回 → rowid 并集去重 → <b>RRF 排序</b>（双路命中者优先）→ 图扩展 → 模型读 summary 判断。<span class="focus">机制</span></div>
+    <div class="quote user"><span class="who">👤 用户</span>external_refs 这个呢？<span class="focus">问外部锚点</span></div>
+    <div class="quote ai"><span class="who">🤖 AI</span>知识↔真实世界的桥：需求单号 / MR / UAT / URL。让记忆里的知识能跳回真实工单落地实际操作；与 edges（内部关系）、file（库内真值）区分。<span class="focus">解释</span></div>
+
+    <div class="phase-summary"><b>对齐：</b>五张表机制全部讲透（FTS 生命周期 / title+body / rowid 隐式 / 双路召回 / external_refs 桥），并修正了"summary 进 FTS"的错误建议。</div>
+  </div>
+</div>
+
+<!-- 阶段 9 -->
+<div class="phase">
+  <span class="phase-no">阶段 9</span>
+  <div class="phase-card">
+    <div class="phase-title">场景验证 · 三场景全覆盖</div>
+    <div class="phase-sub">用问题定义阶段的三个实际场景，验证表结构能否存下、能否支撑使用</div>
+
+    <div class="quote user"><span class="who">👤 用户</span>现在阶段二的表结构设计算是完成了，接下来是验证阶段，我们之前验证的三个实际场景，如果用这套表结构来存储，是否能满足，逐个验证。<span class="focus">验证指令</span></div>
+    <div class="quote ai"><span class="who">🤖 AI</span>逐个走一遍：场景 1（本对话）→ parents 挂靠 + sources 接口 ✓；场景 2（需求开发）→ type×scope + external_refs ✓；场景 3（需求单流程）→ 父 content 顺序 + links 代码关联 + status 成熟度 ✓。<b>三个场景全覆盖，无一表达不了。</b>诚实暴露 3 个小点：review 状态粗细、代码位置承载、顺序检索需解析父 content。<span class="focus">验证结论</span></div>
+
+    <div class="phase-summary"><b>对齐：</b>五张表 + frontmatter 规范经受住三个真实场景验证。3 个小点（够用但不够细）留待属性设计处理。</div>
+    <div class="phase-decision"><b>产出：</b>《存储设计详解》HTML 完整版 + schema.sql + 本文档。</div>
+  </div>
+</div>
+
+</div>
+
+<!-- ==================== 决策清单 ==================== -->
+<h2><span class="no">③</span>完整决策清单（含理由与备选）</h2>
+<div class="card">
+  <div class="tbl-wrap">
+  <table>
+    <tr><th style="width:180px;">决策</th><th style="width:150px;">选择空间</th><th>为什么这么选</th><th style="width:90px;">结果</th></tr>
+    <tr><td>设计方式</td><td>全螺旋 vs 分而治之</td><td>业务层螺旋（场景驱动）；底层影响面大，一次定死</td><td><span class="pill p-green">分而治之</span></td></tr>
+    <tr><td>存储形态</td><td>纯结构化 / 纯非结构化 / 混合</td><td>按数据性质分配；由第一原则驱动（谁消费决定谁用什么）</td><td><span class="pill p-green">混合</span></td></tr>
+    <tr><td>网引擎</td><td>SQLite/DuckDB/Neo4j/LanceDB/纯文件</td><td>SQLite 单文件零部署，覆盖图遍历+全文+向量</td><td><span class="pill p-green">SQLite</span></td></tr>
+    <tr><td>可插拔</td><td>写死 vs 接口+配置</td><td>端口-适配器：契约定死、实现开放，换引擎上层不动</td><td><span class="pill p-green">NetworkStore 接口</span></td></tr>
+    <tr><td>实现语言</td><td>CLI vs Python</td><td>裸 sqlite3 只能查表；重建索引/向量/图遍历是逻辑需脚本</td><td><span class="pill p-green">Python</span></td></tr>
+    <tr><td>关键词检索</td><td>LIKE / 自建索引 / FTS5</td><td>FTS5 就是倒排索引+rowid 关联，trigram 解决中文，不重复造轮子</td><td><span class="pill p-green">FTS5</span></td></tr>
+    <tr><td>语义检索</td><td>第一版上 vs 留增强</td><td>用户拍板"用，必须用"——模糊提示词是核心价值</td><td><span class="pill p-green">sqlite-vec</span></td></tr>
+    <tr><td>判断方式</td><td>读全文 vs 读摘要</td><td>nodes 加 summary，检索返回轻量字段，判断不读全文（gist 落地）</td><td><span class="pill p-green">summary</span></td></tr>
+    <tr><td>正文存储</td><td>nodes 存 body vs 去 body</td><td>用户发现冗余：body 只建索引时用一次，正文只在 md 一处</td><td><span class="pill p-green">去 body</span></td></tr>
+    <tr><td>FTS 列</td><td>title+body vs 加 summary</td><td>summary 进 FTS 造成重复且收益小（词已在 body），收回</td><td><span class="pill p-green">title+body</span></td></tr>
+    <tr><td>中文分词</td><td>默认 vs trigram</td><td>默认对中文整段切，子串搜不到；trigram 支持子串匹配</td><td><span class="pill p-green">trigram</span></td></tr>
+    <tr><td>frontmatter</td><td>枚举 vs 统一格式</td><td>id 统一 k- 前缀；links 简单写 id；status 默认 draft；锚点 anchors/s-日期-序号</td><td><span class="pill p-green">定型</span></td></tr>
+  </table>
+  </div>
+</div>
+
+<!-- ==================== 被否决 ==================== -->
+<h2><span class="no">④</span>被否决的方案</h2>
+<div class="card">
+  <table>
+    <tr><th style="width:220px;">被否决</th><th style="width:150px;">否决方</th><th>原因</th></tr>
+    <tr><td>底层也螺旋迭代</td><td>👤 用户</td><td>底层变动影响面大，一次定死</td></tr>
+    <tr><td>纯结构化（全 SQLite）</td><td>🤖 AI</td><td>正文不可读、不好维护、自然语言硬塞字段很别扭</td></tr>
+    <tr><td>纯非结构化（全 Markdown）</td><td>🤖 AI</td><td>查询弱、图遍历难、关联靠手写链接</td></tr>
+    <tr><td>Neo4j</td><td>🤖 AI</td><td>图最强但个人场景太重，要常驻服务</td></tr>
+    <tr><td>纯文件自建图遍历</td><td>🤖 AI</td><td>多跳串联会写成长期维护的痛，SQLite 递归 CTE 原生解决</td></tr>
+    <tr><td>自建关键词索引表</td><td>🤖 AI（用户认同）</td><td>FTS5 就是这个架构（倒排+rowid 关联），重复造轮子</td></tr>
+    <tr><td>summary 进 FTS 列</td><td>👤 用户</td><td>造成数据重复，且词已在 body，收益小——AI 收回建议</td></tr>
+    <tr><td>nodes 存 body 副本</td><td>👤 用户</td><td>只在建索引时用一次，正文应只在 md 一处（单一真值）</td></tr>
+  </table>
+</div>
+
+<!-- ==================== Ah-ha ==================== -->
+<h2><span class="no">⑤</span>关键转折点（Ah-ha Moments）</h2>
+<div class="card">
+  <table>
+    <tr><th style="width:220px;">转折点</th><th>改变了什么</th></tr>
+    <tr><td>底层不迭代 + 真值/索引隔离</td><td>设计方式定盘：业务螺旋、底层一次定死；真值影响面被隔离</td></tr>
+    <tr><td>第一原则驱动存储</td><td>"系统检索、AI 判断"从检索原则升格为存储分配依据（谁消费决定谁用什么）</td></tr>
+    <tr><td>NetworkStore 接口化</td><td>网引擎可插拔——SQLite 起步、Neo4j 可换，契约定死实现开放</td></tr>
+    <tr><td>FTS5 = 你要的"自建索引表"</td><td>用户"自建索引表"想法 = FTS5 原生架构，避免重复造轮子</td></tr>
+    <tr><td>summary 判断（gist 落地）</td><td>判断阶段不读全文——两步法的 gist 层变成表设计</td></tr>
+    <tr><td>去 body（用户发现冗余）</td><td>正文只在 md 一处，消除双份同步——真值唯一原则贯彻到底</td></tr>
+    <tr><td>rowid 隐式关联</td><td>理解 FTS5 靠 rowid（隐式列）与 nodes 对齐——物理键/业务键分离</td></tr>
+    <tr><td>三场景验证通过</td><td>表结构经受住真实场景考验，阶段二存储设计正式闭合</td></tr>
+  </table>
+</div>
+
+<!-- ==================== 最终状态 ==================== -->
+<h2><span class="no">⑥</span>最终状态快照（阶段二截止）</h2>
+<div class="card">
+  <table>
+    <tr><th style="width:190px;">项</th><th>状态</th></tr>
+    <tr><td>表结构</td><td><b>五张表定稿</b>：nodes（无 body）/ nodes_fts（title+body, trigram）/ nodes_vec（sqlite-vec）/ edges / external_refs</td></tr>
+    <tr><td>真值格式</td><td><b>frontmatter 规范定型</b>：id 统一 k- 前缀 · summary 判断 · sources 接口 · parents 多父 · links · external_refs · status 默认 draft</td></tr>
+    <tr><td>检索机制</td><td>FTS 字面 + 向量语义<b>双路召回 + RRF 合并</b> → 图扩展 → 模型读 summary 判断 → 按 file 下钻</td></tr>
+    <tr><td>底层</td><td>NetworkStore 接口（可插拔）· SQLite 默认 · Python 工具层</td></tr>
+    <tr><td>场景验证</td><td><b>三个场景全覆盖</b>，3 个小点（review 状态/代码位置/顺序检索）留待属性设计</td></tr>
+    <tr><td>文档</td><td>schema.sql · 《存储设计详解》HTML · 本文档</td></tr>
+    <tr><td>下一步</td><td>定 NetworkStore 接口签名 → SQLite 实现 → 复用设计（迭代 2）</td></tr>
+  </table>
+  <div class="note">阶段二的每个设计决策都是被<b>追问逼出来的</b>——"为什么存 body""summary 会不会重复""rowid 在哪"这些问题是设计的磨刀石，把"够用"磨成了"干净"。</div>
+</div>
+
+<div class="foot">
+  记忆/知识管理系统 · 存储设计推演全过程 · 记录数据存储设计如何一步步产生
+</div>
+
+</div>
+</body>
+</html>

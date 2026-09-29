@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>记忆/知识管理系统 · 接口规范与实现指南</title>
+<style>
+  :root{
+    --ink:#1f2430; --muted:#5b6472; --line:#d9dde5; --bg:#f4f6f9; --card:#ffffff;
+    --blue:#2563eb; --blue-soft:#eaf1ff;
+    --green:#059669; --green-soft:#e9f7f1;
+    --orange:#d97706; --orange-soft:#fdf3e3;
+    --purple:#7c3aed; --purple-soft:#f1eafe;
+    --slate:#64748b; --slate-soft:#eef2f7;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:"Microsoft YaHei","PingFang SC","Segoe UI",system-ui,sans-serif;
+    color:var(--ink);background:var(--bg);line-height:1.78;}
+  .wrap{max-width:1120px;margin:0 auto;padding:32px 20px 80px;}
+  header.hero{background:linear-gradient(135deg,#0f2e5c,#2563eb 60%,#3b82f6);color:#fff;
+    border-radius:16px;padding:38px 42px;margin-bottom:32px;}
+  header.hero h1{margin:0 0 10px;font-size:30px;}
+  header.hero p{margin:4px 0;font-size:15px;opacity:.94;}
+  header.hero .tag{display:inline-block;margin-top:14px;padding:6px 14px;
+    background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.3);
+    border-radius:999px;font-size:14px;}
+  h2{font-size:23px;margin:54px 0 6px;padding-left:12px;border-left:4px solid var(--blue);}
+  h2 .no{color:var(--blue);margin-right:6px;}
+  h3{margin:20px 0 8px;font-size:17px;}
+  h4{margin:16px 0 6px;font-size:15px;}
+  .lead{color:var(--muted);margin:0 0 16px;font-size:15px;}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;
+    padding:20px 24px;margin:14px 0;box-shadow:0 1px 3px rgba(16,24,40,.05);}
+  .note{background:var(--orange-soft);border:1px solid #f0d6a8;border-radius:8px;
+    padding:12px 16px;font-size:14px;color:#7a4c06;margin:12px 0;}
+  .pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap;}
+  .p-blue{background:var(--blue-soft);color:var(--blue);}
+  .p-green{background:var(--green-soft);color:var(--green);}
+  .p-orange{background:var(--orange-soft);color:var(--orange);}
+  .p-purple{background:var(--purple-soft);color:var(--purple);}
+  .p-slate{background:var(--slate-soft);color:var(--slate);}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;margin:10px 0;}
+  th,td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top;}
+  th{background:var(--bg);font-weight:600;white-space:nowrap;}
+  code{background:var(--bg);border-radius:6px;padding:2px 6px;font-family:Consolas,monospace;font-size:12.5px;}
+  pre{background:#111827;color:#e5e7eb;border-radius:10px;padding:16px 18px;overflow-x:auto;
+    font-family:Consolas,monospace;font-size:12.5px;line-height:1.65;}
+  pre .c{color:#9ca3af;}
+  ul,ol{margin:8px 0;} li{margin:4px 0;}
+  .tbl-wrap{overflow-x:auto;}
+  .foot{color:var(--muted);font-size:13px;margin-top:48px;text-align:center;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <h1>记忆/知识管理系统 · 接口规范与实现指南</h1>
+  <p>一份文档两种用途：<b>另一个会话拿着它能直接开发</b>；<b>新人读着它能理解系统</b>。</p>
+  <p class="tag">包含：核心对象 · 四接口定义 · 存储契约 · 实现要点 · 完整流程示例</p>
+</header>
+
+<!-- ==================== ① 总览 ==================== -->
+<h2><span class="no">①</span>系统总览（30 秒理解）</h2>
+<p class="lead">先建立心智模型，再看接口就顺了。</p>
+
+<div class="card">
+  <h3 style="margin-top:0;">一句话</h3>
+  <p><b>系统 = 一个锚点 ＋ 三类知识 ＋ 一张网，由四类操作（记忆/蒸馏/收录/关联）驱动，形成"沉淀 → 关联 → 复用 → 再沉淀"的闭环。</b></p>
+
+  <h3>API 分层</h3>
+  <pre>
+┌─────────────────────────────────────────────┐
+│ 业务接口层（面向四操作 + 蒸馏/导入）          │
+│   MemoryWriter 写 · MemoryReader 读          │
+│   Distiller 蒸馏 · Importer 存量导入         │
+├─────────────────────────────────────────────┤
+│ 引擎接口层（可插拔）                         │
+│   NetworkStore：SQLite（默认）/ Neo4j / Memory │
+└─────────────────────────────────────────────┘</pre>
+
+  <h3>第一原则（贯穿所有设计）</h3>
+  <ul>
+    <li><b>检索 = 系统</b>（机械、可验证）——search/traverse 是系统行为</li>
+    <li><b>判断 = 模型</b>（读 summary 判断）——search 返回轻量字段，不读全文</li>
+    <li><b>锚 = 原文</b>（Layer 0 保真）——任何知识可溯源</li>
+  </ul>
+</div>
+
+<!-- ==================== ② 核心概念 ==================== -->
+<h2><span class="no">②</span>核心概念（新人必读）</h2>
+<div class="card">
+  <table>
+    <tr><th style="width:120px;">概念</th><th>含义</th></tr>
+    <tr><td><span class="pill p-purple">锚点</span></td><td>对话原始记录（保真、不可变）。存 anchors/ 目录 md 文件。一切知识的溯源根</td></tr>
+    <tr><td><span class="pill p-blue">知识</span></td><td>事情（发生了什么）/ 经验（怎么办）/ 常识+共识（是什么）。存 knowledge/ 目录 md + frontmatter</td></tr>
+    <tr><td><span class="pill p-green">网</span></td><td>知识之间的关联（挂靠/关联/溯源），SQLite 边表</td></tr>
+    <tr><td><span class="pill p-slate">四操作</span></td><td>记忆（对话→锚点）· 蒸馏（对话→知识）· 收录（告知→知识）· 关联（建边）</td></tr>
+    <tr><td><span class="pill p-orange">三级粒度</span></td><td>title 扫（候选列表）→ summary 判（是不是这件事）→ file 钻（细节原文）</td></tr>
+  </table>
+  <div class="note"><b>蒸馏流程（重点）</b>：你说"帮我蒸馏" → AI 整体整理当前对话 → 产出候选清单（含关联建议）→ 你 review 勾选 → 确认的入库 + 按确认的关联建边。<b>前期全人工确认，规则沉淀是后续方向。</b></div>
+</div>
+
+<!-- ==================== ③ 核心对象 ==================== -->
+<h2><span class="no">③</span>核心对象（类型定义，开发直接抄）</h2>
+<p class="lead">所有接口的参数建立在以下类型上。</p>
+
+<div class="card">
+<pre><span class="c"># —— 枚举 ——</span>
+class KnowledgeType(Enum): EVENT; METHOD; FACT
+class Scope(Enum): UNIVERSAL; DOMAIN; PERSONAL
+class Status(Enum): DRAFT; EVOLVING; SETTLED; DEPRECATED
+class EdgeType(Enum): PARENT; LINK; TRACE
+class RefType(Enum): IDEV; MR; UAT; URL
+class SourceType(Enum): USER_DECLARED; CONVERSATION_DISTILLED
+class Decision(Enum): KEEP; EDIT; REJECT
+
+<span class="c"># —— 值对象 ——</span>
+class Source:
+    type: SourceType      <span class="c"># 知识来源</span>
+    ref: str              <span class="c"># 锚点引用（anchor_id 或路径）</span>
+
+class ExternalRef:
+    type: RefType         <span class="c"># idev | mr | uat | url</span>
+    value: str
+
+class Knowledge:          <span class="c"># 知识本体（create/update 的主体）</span>
+    type: KnowledgeType
+    scope: Scope
+    title: str
+    summary: str          <span class="c"># 判断用摘要（3~5 句）</span>
+    body: str             <span class="c"># 正文</span>
+    sources: list[Source]
+    parents: list[str]    <span class="c"># 多父挂靠（id 列表，DAG）</span>
+    links: list[str]      <span class="c"># 关联（id 列表）</span>
+    external_refs: list[ExternalRef]
+    status: Status = Status.DRAFT
+
+class SearchHit:          <span class="c"># search 返回的候选条目</span>
+    id: str
+    title: str
+    summary: str          <span class="c"># 供模型判断，不读全文</span>
+    file: str             <span class="c"># 供下钻</span>
+    type: KnowledgeType
+    scope: Scope
+    score: float          <span class="c"># RRF 融合分（排序）</span>
+
+class DistillCandidate:   <span class="c"># 蒸馏产出的单条候选</span>
+    type: KnowledgeType
+    scope: Scope
+    title: str
+    summary: str
+    body: str
+    suggested_parents: list[str]   <span class="c"># 关联建议（AI 给，review 可改）</span>
+    suggested_links: list[str]
+    sources: list[Source]          <span class="c"># 自动带 conversation_distilled + ref</span>
+    decision: Decision = Decision.KEEP</pre>
+</div>
+
+<!-- ==================== ④ 接口定义 ==================== -->
+<h2><span class="no">④</span>接口定义（四接口，开发直接抄）</h2>
+
+<div class="card">
+  <h3 style="margin-top:0;">MemoryWriter · 写接口（新增/更新）</h3>
+  <pre><span class="c"># 职责：保证 md 真值 + 五张表一致性（写入的唯一入口）</span>
+class MemoryWriter:
+    def save_anchor(self, content: str, title: str = None) -> str
+        <span class="c"># 记忆：对话 → 锚点文件；返回 anchor_id（供 sources.ref）</span>
+
+    def create_knowledge(self, k: Knowledge) -> str
+        <span class="c"># 蒸馏/收录：写一条知识（生成 md + 同步五张表）；id 由接口自动生成并返回</span>
+
+    def update_knowledge(self, id: str, **changes) -> None
+        <span class="c"># 改版：只改指定字段（None=不变）；改 body 自动 FTS delete+insert</span>
+
+    def deprecate_knowledge(self, id: str) -> None
+        <span class="c"># 废弃：status → DEPRECATED，留痕不删</span>
+
+    def add_edge(self, from_id: str, to_id: str, edge_type: EdgeType) -> None
+    def remove_edge(self, from_id: str, to_id: str, edge_type: EdgeType) -> None
+
+    def add_external_ref(self, node_id: str, ref_type: RefType, ref_value: str) -> None
+    def remove_external_ref(self, node_id: str, ref_type: RefType, ref_value: str) -> None</pre>
+
+  <h3>MemoryReader · 读接口（检索）</h3>
+  <pre><span class="c"># 职责：系统机械检索，返回轻量字段供模型判断</span>
+class MemoryReader:
+    def search(self, query: str, limit: int = 10,
+               type: KnowledgeType = None, scope: Scope = None) -> list[SearchHit]
+        <span class="c"># 双路召回（FTS 字面 + 向量语义 + RRF 合并）→ 候选（id/title/summary/file）</span>
+
+    def traverse(self, start_id: str, depth: int = 2,
+                 edge_types: list[EdgeType] = None) -> list[tuple[str, EdgeType, int]]
+        <span class="c"># 图遍历：返回 (节点id, 边类型, 跳数)</span>
+
+    def get(self, id: str) -> Knowledge | None
+        <span class="c"># 按 id 取完整知识（含 external_refs / sources / links）</span></pre>
+
+  <h3>Distiller · 蒸馏接口</h3>
+  <pre><span class="c"># 职责：从对话产出候选（不落库）→ 用户 review → 确认入库</span>
+class Distiller:
+    def distill(self, anchor_id: str = None, topic: str = None) -> list[DistillCandidate]
+        <span class="c"># anchor_id 为空 → 蒸馏当前上下文对话（实时，AI 直接整理）</span>
+        <span class="c"># anchor_id 指定 → 蒸馏该锚点完整对话（早期/存量，读文件）</span>
+        <span class="c"># 产出候选清单（含关联建议），不落库</span>
+
+    def confirm_distill(self, candidates: list[DistillCandidate]) -> list[str]
+        <span class="c"># KEEP/EDIT → create_knowledge + 按确认的关联建边；REJECT → 跳过</span>
+        <span class="c"># 返回入库 id 列表</span></pre>
+
+  <h3>Importer · 存量导入</h3>
+  <pre><span class="c"># 职责：历史对话批量导入（与增量共用管道，只是批量）</span>
+class Importer:
+    def import_history(self, source_dir: str,
+                       time_range: tuple[str, str] = None,
+                       mode: str = 'backfill') -> ImportResult
+        <span class="c"># 扫描历史 JSONL → 批量生成锚点 → 批量蒸馏 → 建索引</span>
+        <span class="c"># mode: backfill（全量）/ incremental（增量）</span>
+
+class ImportResult:
+    anchors_created: int
+    knowledge_created: int
+    errors: list[str]</pre>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">接口约定的关键点</h3>
+  <table>
+    <tr><th style="width:190px;">约定</th><th>说明</th></tr>
+    <tr><td>id 生成</td><td><code>create_knowledge</code> 接口自动生成（k-0003 序列），调用方不用管</td></tr>
+    <tr><td>蒸馏确认</td><td>前期全人工 review；规则沉淀是后续方向（暂不实现）</td></tr>
+    <tr><td>存量导入确认</td><td>前期逐个 review；确认稳定后改为自动执行（过程纠正会记录下来）</td></tr>
+    <tr><td>无顶层门面</td><td>四接口分开直接用；遇到必须合并的问题再合并</td></tr>
+    <tr><td>get 返回</td><td>返回完整 Knowledge（含 external_refs 等），更多返回便于开发优化</td></tr>
+  </table>
+</div>
+
+<!-- ==================== ⑤ 存储契约 ==================== -->
+<h2><span class="no">⑤</span>存储契约（开发必须遵守）</h2>
+
+<div class="card">
+  <h3 style="margin-top:0;">目录结构</h3>
+  <pre>
+memory/                      <span class="c"># 记忆库根目录</span>
+├── anchors/                 <span class="c"># 锚点：对话记录（保真，不可变）</span>
+│   └── s-&lt;日期&gt;-&lt;序号&gt;.md
+├── knowledge/               <span class="c"># 知识：md + frontmatter（唯一真值）</span>
+│   └── k-&lt;序号&gt;_&lt;标题&gt;.md
+└── db/
+    └── memory.db            <span class="c"># SQLite（五张表，可从 knowledge/ 重建）</span></pre>
+
+  <h3>frontmatter 规范（知识 md 真值）</h3>
+  <pre>---
+id: k-0003
+type: fact              <span class="c"># event | method | fact</span>
+scope: domain           <span class="c"># universal | domain | personal</span>
+title: 需求单业务流程
+summary: 需求单完整业务流转：提交→报价→审批→选方案→出票
+sources:
+  - type: user_declared <span class="c"># user_declared | conversation_distilled</span>
+    ref: anchors/s-20260814-001.md
+parents: []             <span class="c"># 多父挂靠</span>
+links:
+  - k-0010
+external_refs:
+  - type: idev          <span class="c"># idev | mr | uat | url</span>
+    value: idev-8031426
+status: draft           <span class="c"># draft | evolving | settled | deprecated</span>
+created: 2026-08-14
+updated: 2026-08-14
+---
+（正文：知识内容）</pre>
+
+  <h3>五张表（schema.sql，见同目录文件）</h3>
+  <table>
+    <tr><th style="width:130px;">表</th><th>作用</th><th>关键</th></tr>
+    <tr><td>nodes</td><td>知识本体索引（无 body）</td><td>rowid 是四表关联键；id 业务键</td></tr>
+    <tr><td>nodes_fts</td><td>FTS5 字面检索</td><td>title+body 两列，trigram 分词</td></tr>
+    <tr><td>nodes_vec</td><td>向量语义检索</td><td>sqlite-vec，embedding float[N]</td></tr>
+    <tr><td>edges</td><td>网的关系</td><td>parent / link / trace</td></tr>
+    <tr><td>external_refs</td><td>知识↔真实世界</td><td>idev / mr / uat / url</td></tr>
+  </table>
+</div>
+
+<!-- ==================== ⑥ 实现要点 ==================== -->
+<h2><span class="no">⑥</span>实现要点（关键逻辑，直接指导开发）</h2>
+
+<div class="card">
+  <h3 style="margin-top:0;">create_knowledge 内部逻辑（一致性核心）</h3>
+  <pre><span class="c"># 1. 生成 md 真值文件</span>
+path = f"knowledge/{k.id}_{k.title}.md"
+write_md(path, frontmatter(k), k.body)
+
+<span class="c"># 2. 同步五张表（一个事务，原子）</span>
+with db.transaction():
+    rowid = INSERT nodes(id, file, title, summary, type, scope, status, created, updated)
+    INSERT nodes_fts(rowid, title, body)        <span class="c"># 正文从 md 读入</span>
+    INSERT nodes_vec(rowid, embedding)          <span class="c"># summary 算向量</span>
+    for p in k.parents:  INSERT edges(k.id, p, 'parent')
+    for l in k.links:    INSERT edges(k.id, l, 'link')
+    for r in k.external_refs: INSERT external_refs(...)</pre>
+
+  <h3>FTS 更新（FTS5 不支持 UPDATE）</h3>
+  <pre><span class="c"># update_knowledge 改 body 时：</span>
+INSERT INTO nodes_fts(nodes_fts, rowid, title, body) VALUES('delete', :rowid, :old_title, :old_body)
+INSERT INTO nodes_fts(rowid, title, body) VALUES(:rowid, :new_title, :new_body)</pre>
+
+  <h3>检索链路（search 内部）</h3>
+  <pre><span class="c"># 1. 双路召回</span>
+fts_rowids  = SELECT rowid FROM nodes_fts WHERE nodes_fts MATCH :query
+vec_rowids  = SELECT rowid FROM nodes_vec WHERE embedding MATCH :query_vec ORDER BY distance LIMIT N
+
+<span class="c"># 2. RRF 合并（两路分数不可比，用排名融合）</span>
+score = Σ 1/(60 + rank)   <span class="c"># 双路命中者优先</span>
+
+<span class="c"># 3. JOIN nodes 取轻量字段</span>
+SELECT id, title, summary, type, scope, file FROM nodes WHERE rowid IN (...)</pre>
+
+  <h3>rowid 对齐（易错点）</h3>
+  <pre><span class="c"># nodes 和 nodes_fts/nodes_vec 必须用同一个 rowid（一个事务内）</span>
+rowid = conn.execute("INSERT INTO nodes(...)").lastrowid
+conn.execute("INSERT INTO nodes_fts(rowid, ...)", (rowid, ...))</pre>
+
+  <h3>rebuild（兜底，幂等）</h3>
+  <pre><span class="c"># 扫描 knowledge/*.md → 重建 nodes → 重建 FTS → 重建 vec → 重建 edges</span>
+def rebuild():
+    clear_all_tables()
+    for md in scan("knowledge/*.md"):
+        k = parse_md(md)
+        create_knowledge(k)</pre>
+</div>
+
+<!-- ==================== ⑦ 完整流程示例 ==================== -->
+<h2><span class="no">⑦</span>完整流程示例（开发 + 理解用）</h2>
+
+<div class="card">
+  <h3 style="margin-top:0;">流程一：收录业务流程</h3>
+  <pre><span class="c"># 用户告知需求单流程（收录 → create_knowledge）</span>
+writer.create_knowledge(流程 k-0003, type=FACT, scope=DOMAIN,
+                        sources=[user_declared])
+writer.create_knowledge(环节 k-0010, type=FACT, scope=DOMAIN,
+                        parents=[k-0003])        <span class="c"># 挂靠总流程</span>
+writer.add_edge(k-0010, k-0030, EdgeType.LINK)  <span class="c"># 关联代码</span></pre>
+
+  <h3 style="margin-top:0;">流程二：蒸馏一段开发对话</h3>
+  <pre><span class="c"># 用户说"帮我蒸馏"</span>
+cands = distiller.distill()                     <span class="c"># 当前上下文 → 候选（含关联建议）</span>
+<span class="c"># 用户 review：k1 keep / k2 edit / k3 reject</span>
+ids = distiller.confirm_distill(cands)          <span class="c"># 确认的入库 + 建关联</span></pre>
+
+  <h3 style="margin-top:0;">流程三：下次复用（改需求单）</h3>
+  <pre>hits = reader.search("改一下审批环节")           <span class="c"># 候选（summary 判断）</span>
+rel  = reader.traverse("k-0010", 2)             <span class="c"># 父流程/代码/经验</span>
+full = reader.get("k-0010")                     <span class="c"># 下钻完整知识</span></pre>
+
+  <h3 style="margin-top:0;">流程四：存量导入历史会话</h3>
+  <pre>result = importer.import_history("~/.claude/projects/", mode="backfill")
+<span class="c"># 前期：每个候选逐个 review；确认稳定后自动执行（纠正过程会记录下来）</span></pre>
+</div>
+
+<!-- ==================== ⑧ 边界与约定 ==================== -->
+<h2><span class="no">⑧</span>边界与约定（实现前必读）</h2>
+<div class="card">
+  <table>
+    <tr><th style="width:200px;">项</th><th>约定</th></tr>
+    <tr><td>蒸馏确认</td><td>前期全人工 review（候选 → 勾选 → 入库）；规则沉淀是后续方向，暂不实现</td></tr>
+    <tr><td>存量导入确认</td><td>前期逐个 review；确认稳定后改自动执行，纠正过程会记录用于规则沉淀</td></tr>
+    <tr><td>embedding 服务</td><td>向量要外部模型算（API 或本地）——这是引入向量表唯一的外部依赖；N 维由所选模型定</td></tr>
+    <tr><td>无 body 存储</td><td>正文只在 md 文件一处；FTS 索引 rebuild 时从 md 读入——不存双份</td></tr>
+    <tr><td>中文分词</td><td>FTS5 必须用 trigram tokenizer（默认对中文整段切，子串搜不到）</td></tr>
+    <tr><td>错误处理</td><td>create/update 在事务内原子；失败回滚，md 文件与索引保持一致</td></tr>
+    <tr><td>幂等性</td><td>rebuild / import_history 可重复执行（IF NOT EXISTS + 全量重建）</td></tr>
+  </table>
+</div>
+
+<!-- ==================== ⑨ 目录结构 ==================== -->
+<h2><span class="no">⑨</span>代码目录结构（开发参考）</h2>
+<div class="card">
+  <pre>
+memory-tool/
+├── config.yaml              <span class="c"># network_store: sqlite；embedding 模型；N 维</span>
+├── store/
+│   ├── base.py              <span class="c"># NetworkStore 接口（rebuild/upsert/query/traverse/semantic）</span>
+│   ├── sqlite_store.py      <span class="c"># SQLite 实现（五张表）</span>
+│   └── memory_store.py      <span class="c"># 内存实现（测试用）</span>
+├── api/
+│   ├── types.py             <span class="c"># 枚举 + 值对象（Knowledge/SearchHit/DistillCandidate）</span>
+│   ├── writer.py            <span class="c"># MemoryWriter</span>
+│   ├── reader.py            <span class="c"># MemoryReader</span>
+│   ├── distiller.py         <span class="c"># Distiller（调用模型做蒸馏）</span>
+│   └── importer.py          <span class="c"># Importer</span>
+├── schema.sql               <span class="c"># 五张表完整结构</span>
+├── rebuild.py               <span class="c"># 从 md 全量重建</span>
+└── main.py                  <span class="c"># 统一命令入口：rebuild / search / traverse / distill / import</span></pre>
+</div>
+
+<div class="foot">
+  记忆/知识管理系统 · 接口规范与实现指南 · 供另一会话直接开发 &amp; 新人理解交接
+</div>
+
+</div>
+</body>
+</html>

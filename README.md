@@ -110,32 +110,32 @@ micro_mem 的思路是把两者拆开——**真值用 Markdown（人和 AI 都�
 > 需要 **Python ≥ 3.10**——源码用 `X | None` 作运行时注解（PEP 604），3.9 会在 import 阶段直接报错。
 
 ```bash
-# 1. 依赖（目前只有一个）
-python -m pip install -r requirements.txt
+# 1. 安装（editable：装依赖 + 注册 mem 等入口点）
+python -m pip install -e .
 
 # 2. 建目录 + 建库（幂等，可重复执行）
-python build_db.py
+mem-build-db
 
 # 3. 收录一条知识
-python src/main.py create \
+mem create \
   --type fact --scope domain \
   --title "需求单状态机" \
   --summary "需求单在审批中、已通过、已驳回之间流转，驳回可重新提交。" \
   --body "详细说明……"
 
 # 4. 检索
-python src/main.py search "审批"                 # 单关键词
-python src/main.py search "需求 审批 状态" --multi   # 多关键词融合
+mem search "审批"                    # 单关键词
+mem search "需求 审批 状态" --multi  # 多关键词融合
 
 # 5. 取详情 / 图遍历
-python src/main.py get k-0001
-python src/main.py traverse k-0001 --depth 2
+mem get k-0001
+mem traverse k-0001 --depth 2
 
 # 6. 从 md 真值全量重建索引（索引坏了就跑这个）
-python src/main.py rebuild
+mem rebuild
 
 # 7. 可视化
-python src/server.py                            # 打开 http://localhost:8000/
+mem-server                           # 打开 http://localhost:8000/
 ```
 
 > 命令请在**项目根目录**执行。数据目录 `data_dir` 在 `config.yaml` 中配置，相对路径按**项目根**解析（不依赖当前工作目录），所以数据永远落在同一个地方。
@@ -144,18 +144,19 @@ python src/server.py                            # 打开 http://localhost:8000/
 
 | 命令 | 作用 |
 |---|---|
-| `python src/main.py create` | 收录一条知识（来源标记为 `user_declared`） |
-| `python src/main.py search [--multi] [--limit N]` | 双路召回检索 |
-| `python src/main.py get <id>` | 取单条知识全文 |
-| `python src/main.py traverse <id> [--depth N]` | 沿边做 N 跳图遍历 |
-| `python src/main.py rebuild` | 清空索引，从 `data/knowledge/*.md` 全量重建 |
-| `python src/main.py import --dir <目录> [--mode backfill\|incremental]` | 存量导入历史会话 |
-| `python src/server.py [--port 8000]` | 起可视化服务 |
-| `python tests/run_tests.py` | 跑测试（临时目录隔离，不碰真实数据） |
+| `mem create` | 收录一条知识（来源标记为 `user_declared`） |
+| `mem search [--multi] [--limit N]` | 双路召回检索 |
+| `mem get <id>` | 取单条知识全文 |
+| `mem traverse <id> [--depth N]` | 沿边做 N 跳图遍历 |
+| `mem rebuild` | 清空索引，从 `data/knowledge/*.md` 全量重建 |
+| `mem import --dir <目录> [--mode backfill\|incremental]` | 存量导入历史会话 |
+| `mem anchor / distill / confirm` | 蒸馏会话（锚点 / 增量准备 / 落库） |
+| `mem-server [--port 8000]` | 起可视化服务 |
+| `pytest` | 跑测试（临时目录隔离，不碰真实数据） |
 
 ## 可视化
 
-`python src/server.py` 后访问 <http://localhost:8000/>：知识图谱（ECharts 力导向图）、节点详情、检索、锚点列表。
+`mem-server` 后访问 <http://localhost:8000/>：知识图谱（ECharts 力导向图）、节点详情、检索、锚点列表。
 
 API：
 
@@ -177,76 +178,75 @@ micro_mem 的定位是**给 AI 做长期记忆的底座**，它只提供机制�
 
 ```bash
 # ① 把一次会话落成保真锚点（缺省取 ~/.claude/projects 下最新会话）
-python distill_this_session.py anchor
+mem anchor
 
 # ② 增量蒸馏准备：重同步锚点，输出自上次蒸馏以来的新增轮次
-python distill_this_session.py distill
+mem distill
 
 # ③ 模型读增量轮次 → 产出候选 JSON（这一步是 AI 干的，工具不管）
 # ④ 落库：幂等去重 + 溯源校验（sources.ref 必须指向真实锚点）+ 回写蒸馏游标 + 自动挂靠
-python distill_this_session.py confirm candidates.json
+mem confirm candidates.json
 ```
 
 之后在需要时用 `search` 检索并把命中的 `summary` 注入上下文，让模型判断要不要 `get` 全文。
 
 `data/temp/distill_state.json` 记录蒸馏游标，所以**增量蒸馏不会重复提炼已经沉淀过的轮次**。
 
-> 同一个 `anchor` / `distill` / `confirm` 也可以直接用 `python src/main.py import` 批量做存量导入。
+> 同一个 `anchor` / `distill` / `confirm` 也可以直接用 `mem import` 批量做存量导入。
 
 ### 装成 Claude Code skill
 
-上面这套流程有一份现成的 skill 定义，在 `skills/memory-knowledge/`：
+上面这套流程有一份现成的 skill 定义，在 `clients/skill/memory-knowledge/`：
 
 ```bash
 # 用户级（所有项目可用）
-cp -r skills/memory-knowledge ~/.claude/skills/
+cp -r clients/skill/memory-knowledge ~/.claude/skills/
 
 # 或项目级（只在该项目可用）
-mkdir -p <项目>/.claude/skills && cp -r skills/memory-knowledge <项目>/.claude/skills/
+mkdir -p <项目>/.claude/skills && cp -r clients/skill/memory-knowledge <项目>/.claude/skills/
 ```
 
 它把「从用户问题提取核心词 → `search` → 判断要不要 `get` → 蒸馏时先展示候选再落库」这套**判断规则**写成了模型可执行的流程，也就是核心原则里"判断归模型"的那一半。
 
-把 `bin/` 加入 PATH 后，可以直接用 `mem` 前缀调用所有命令：
+把 `clients/cli/` 加入 PATH 后，可以直接用 `mem` 前缀调用所有命令（也可 `pip install -e .` 用标准入口点，见 `clients/README.md`）：
 
 ```bash
 # Windows（PowerShell，一次性）
-setx PATH "$env:PATH;<仓库路径>\bin"
+setx PATH "$env:PATH;<仓库路径>\clients\cli"
 
 # macOS / Linux
-export PATH="<仓库路径>/bin:$PATH"
+export PATH="<仓库路径>/clients/cli:$PATH"
 mem search "关键词"
 mem get k-0001
 ```
 
-`bin/mem.cmd`（Windows）与 `bin/mem.sh`（macOS / Linux）都用**脚本自身位置**推导仓库根，所以仓库可以放在任何位置；需要换位置时用 `MEMORY_HOME` 环境变量覆盖。skill 里不含任何个人路径或私有配置。
+`clients/cli/mem.cmd`（Windows）与 `clients/cli/mem.sh`（macOS / Linux）都用**脚本自身位置**推导仓库根，所以仓库可以放在任何位置；需要换位置时用 `MEMORY_HOME` 环境变量覆盖。skill 里不含任何个人路径或私有配置。
 
 ## 目录结构
 
 ```
 micro_mem/
+├── pyproject.toml              打包 + 入口点 + 依赖 + ruff/mypy/pytest 配置
 ├── config.yaml                 配置
-├── requirements.txt            依赖
 ├── schema.sql                  SQLite 表结构
-├── build_db.py                 建目录 + 建库
-├── import_one.py               导入单个会话 → 锚点
-├── distill_this_session.py     蒸馏当前会话（anchor / distill / confirm）
 ├── TEST_CASES.md               测试用例清单
 ├── src/
-│   ├── main.py                 统一命令入口
-│   ├── server.py               可视化 HTTP 服务
-│   ├── config.py               配置加载
-│   ├── types.py                领域类型
-│   ├── md_parser.py            Markdown + frontmatter 解析
-│   ├── embedder.py             向量化接口 + HashEmbedder
-│   ├── api/                    四接口：writer / reader / distiller / importer
-│   └── store/                  引擎：base（接口）+ sqlite_store（实现）
-├── tests/run_tests.py          测试执行器
-├── skills/
-│   └── memory-knowledge/       Claude Code skill 定义（拷到 ~/.claude/skills/ 使用）
-├── bin/
-│   ├── mem.cmd                 命令包装器（Windows）
-│   └── mem.sh                  命令包装器（macOS / Linux）
+│   ├── README.md               分层说明（隔离层 + 包内四段式）
+│   └── micro_mem/              包根（src-layout，导入名 micro_mem）
+│       ├── domain/             领域类型（types.py）
+│       ├── common/             基础件（config / embedder / md_parser）
+│       ├── store/              引擎：base（接口）+ sqlite_store（实现）
+│       ├── api/                接口：writer / reader / distiller / importer / attach
+│       ├── container.py        装配容器（Composition Root）
+│       └── cli/                命令入口：main / server / build_db / import_one / distill
+├── clients/                    入口层（给人和 AI 用）
+│   ├── README.md               入口层说明
+│   ├── cli/                    命令包装器
+│   │   ├── mem.cmd             （Windows）
+│   │   └── mem.sh              （macOS / Linux）
+│   └── skill/
+│       └── memory-knowledge/   Claude Code skill 定义（拷到 ~/.claude/skills/ 使用）
+├── tests/                      pytest 用例（conftest.py + test_*.py）
 ├── examples/                   合成示例数据（虚构，可随意改删）
 │   ├── knowledge/              5 条示例知识
 │   ├── anchors/                1 个示例锚点
@@ -275,7 +275,8 @@ micro_mem/
 ## 测试
 
 ```bash
-python tests/run_tests.py
+pytest                 # 功能用例（性能用例默认排除）
+pytest -m perf         # 单独跑性能用例
 ```
 
 用例按 `TEST_CASES.md` 编号组织，**全部使用临时 data 目录与临时 db**，不会污染真实知识库。

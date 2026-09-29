@@ -1,0 +1,39 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - heading "🧠 记忆系统 · 可视化" [level=1] [ref=e3]
+    - generic [ref=e4]:
+      - textbox "搜索知识…（如：记忆系统 / 螺旋迭代）" [ref=e5]
+      - button "搜索" [ref=e6] [cursor=pointer]
+      - button "重置" [ref=e7] [cursor=pointer]
+    - generic [ref=e8]:
+      - generic [ref=e9]: 知识 0
+      - generic [ref=e10]: 关联 0
+      - generic [ref=e11]: 锚点 0
+  - main [ref=e12]:
+    - complementary [ref=e13]:
+      - generic [ref=e14]:
+        - button "📚 知识" [ref=e15] [cursor=pointer]
+        - button "📎 锚点" [ref=e16] [cursor=pointer]
+      - generic [ref=e17]:
+        - generic [ref=e18] [cursor=pointer]: 全部
+        - generic [ref=e19] [cursor=pointer]: 事情
+        - generic [ref=e20] [cursor=pointer]: 方法
+        - generic [ref=e21] [cursor=pointer]: 常识
+      - generic [ref=e22]:
+        - generic [ref=e23] [cursor=pointer]:
+          - generic [ref=e24]:
+            - text: 共享航班：承运航司与销售航司分离（TCX-66155）
+            - generic [ref=e26]: 常识
+          - generic [ref=e27]: 自动报价场景下，承运航司（实际执飞）与销售航司（票面/出票方）可能不是同一家，需在报价链路新增销售航司字段并保存。
+        - generic [ref=e28] [cursor=pointer]:
+          - generic [ref=e29]:
+            - text: 销售航司字段落地：marketing* 命名与跨仓库改动
+            - generic [ref=e31]: 方法
+          - generic [ref=e32]: 销售航司字段涉及 api-client（VO）+ flightintl-booking（DDL/entity/落库/回显）两仓库，落库只在 submitPrice/updatePrice 两处需同步改。
+        - generic [ref=e33] [cursor=pointer]:
+          - generic [ref=e34]:
+            - text: flightintl-booking 编译需 JDK11 + 契约 jar 版本对齐
+            - generic [ref=e36]: 常识
+          - generic [ref=e37]: flightintl-booking 本机编译必须用 JDK11，默认 JDK17 会导致零诊断 BUILD FAILURE；外部契约 VO 在 api-client 仓库，版本 4.27.2 对齐。
+    - complementary [ref=e44]:
+      - generic [ref=e46]: 👈 点击图谱节点或左侧列表查看知识详情与关联网络

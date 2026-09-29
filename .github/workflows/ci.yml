@@ -19,33 +19,34 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: 安装依赖
+      - name: 安装依赖（editable 安装，装依赖 + 入口点）
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
+          python -m pip install -e .
+          python -m pip install pytest
 
       - name: 建库（校验 schema.sql 与 FTS5 trigram 分词器可用）
-        run: python build_db.py
+        run: mem-build-db
 
       - name: 加载示例数据并重建索引
         run: |
           cp examples/knowledge/*.md data/knowledge/
           cp examples/anchors/*.md   data/anchors/
-          python src/main.py rebuild | tee /tmp/rebuild.log
+          mem rebuild | tee /tmp/rebuild.log
           # 回归守卫：rebuild 曾因计数变量未自增而恒打印 "0 条知识重建"
           grep -qE "rebuild 完成：[1-9][0-9]* 条知识重建" /tmp/rebuild.log
 
       - name: 校验检索可用（字面路 + 多关键词融合）
         run: |
-          python src/main.py search "发酵" | tee /tmp/search1.log
+          mem search "发酵" | tee /tmp/search1.log
           grep -q "^\[k-" /tmp/search1.log
-          python src/main.py search "发酵 温度" --multi | tee /tmp/search2.log
+          mem search "发酵 温度" --multi | tee /tmp/search2.log
           grep -q "^\[k-" /tmp/search2.log
 
       - name: 校验图遍历（parent/link 边）
         run: |
-          python src/main.py traverse k-0001 --depth 2 | tee /tmp/traverse.log
+          mem traverse k-0001 --depth 2 | tee /tmp/traverse.log
           grep -q "^  k-0001 -\[parent\]→" /tmp/traverse.log
 
-      - name: 跑测试套件
-        run: python tests/run_tests.py
+      - name: 跑测试套件（功能用例；性能用例默认排除）
+        run: pytest -m "not perf"

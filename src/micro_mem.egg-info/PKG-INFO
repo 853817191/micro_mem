@@ -1,0 +1,14 @@
+Metadata-Version: 2.4
+Name: micro-mem
+Version: 0.1.0
+Summary: 记忆/知识管理系统：锚点 + 知识 + 网（检索归系统、判断归模型、锚归原文）
+Requires-Python: >=3.10
+License-File: LICENSE
+License-File: NOTICE
+Requires-Dist: pyyaml>=6.0
+Requires-Dist: sqlite-vec>=0.1.9
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0; extra == "dev"
+Requires-Dist: ruff>=0.4; extra == "dev"
+Requires-Dist: mypy>=1.8; extra == "dev"
+Dynamic: license-file

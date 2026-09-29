@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "micro-mem"
+version = "0.1.0"
+description = "记忆/知识管理系统：锚点 + 知识 + 网（检索归系统、判断归模型、锚归原文）"
+requires-python = ">=3.10"
+dependencies = [
+    "pyyaml>=6.0",
+    "sqlite-vec>=0.1.9",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.4",
+    "mypy>=1.8",
+]
+
+[project.scripts]
+mem = "micro_mem.cli.main:main"
+mem-server = "micro_mem.cli.server:main"
+mem-build-db = "micro_mem.cli.build_db:build"
+mem-import-one = "micro_mem.cli.import_one:main"
+mem-distill = "micro_mem.cli.distill:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["-m", "not perf"]
+markers = [
+    "perf: 性能用例（默认排除，`pytest -m perf` 单独执行）",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true

@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>记忆/知识管理系统 · 快速上手</title>
+<style>
+  :root{
+    --ink:#1f2430;
+    --muted:#5b6472;
+    --line:#d9dde5;
+    --bg:#f4f6f9;
+    --card:#ffffff;
+    --blue:#2563eb;
+    --blue-soft:#eaf1ff;
+    --green:#059669;
+    --green-soft:#e9f7f1;
+    --orange:#d97706;
+    --orange-soft:#fdf3e3;
+    --purple:#7c3aed;
+    --purple-soft:#f1eafe;
+    --slate:#64748b;
+    --slate-soft:#eef2f7;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    font-family:"Microsoft YaHei","PingFang SC","Segoe UI",system-ui,sans-serif;
+    color:var(--ink);
+    background:var(--bg);
+    line-height:1.75;
+  }
+  .wrap{max-width:1080px;margin:0 auto;padding:32px 20px 80px;}
+  header.hero{
+    background:linear-gradient(135deg,#1e3a8a,#2563eb 60%,#3b82f6);
+    color:#fff;
+    border-radius:16px;
+    padding:36px 40px;
+    margin-bottom:32px;
+  }
+  header.hero h1{margin:0 0 10px;font-size:30px;letter-spacing:.5px;}
+  header.hero p{margin:4px 0;font-size:16px;opacity:.94;}
+  header.hero .tag{
+    display:inline-block;margin-top:14px;padding:6px 14px;
+    background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.3);
+    border-radius:999px;font-size:14px;
+  }
+  h2{
+    font-size:22px;margin:52px 0 6px;
+    padding-left:12px;border-left:4px solid var(--blue);
+  }
+  h2 .no{color:var(--blue);margin-right:6px;}
+  .lead{color:var(--muted);margin:0 0 18px;font-size:15px;}
+  .card{
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:12px;
+    padding:20px 24px;
+    margin:14px 0;
+    box-shadow:0 1px 3px rgba(16,24,40,.05);
+  }
+  .note{
+    background:var(--orange-soft);
+    border:1px solid #f0d6a8;
+    border-radius:8px;
+    padding:12px 16px;
+    font-size:14px;
+    color:#7a4c06;
+    margin:12px 0;
+  }
+
+  /* ===== 图通用 ===== */
+  .figure{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:22px;margin:16px 0;}
+  .fig-title{font-weight:600;font-size:15px;color:var(--muted);margin-bottom:14px;text-align:center;}
+  .box{
+    border-radius:10px;padding:10px 14px;
+    border:1px solid;text-align:center;font-size:14px;
+  }
+  .box .t{font-weight:700;font-size:15px;display:block;}
+  .box .d{font-size:12.5px;opacity:.82;display:block;margin-top:2px;}
+  .arrow{color:var(--muted);font-size:20px;text-align:center;line-height:1;}
+
+  /* 图1：一句话骨架 */
+  .fig1-role{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;}
+  .fig1-role .box{flex:1;min-width:190px;max-width:260px;}
+  .fig1-ops{
+    display:flex;gap:10px;justify-content:center;flex-wrap:wrap;
+    margin-top:14px;
+  }
+  .fig1-ops .op{background:var(--blue-soft);border:1px solid #bcd2fb;color:var(--blue);
+    padding:8px 16px;border-radius:999px;font-weight:600;font-size:14px;}
+  .loopline{display:flex;align-items:center;justify-content:center;gap:10px;margin-top:16px;color:var(--muted);font-size:14px;flex-wrap:wrap;}
+  .loopline .sep{color:#9aa3b2;}
+
+  /* 图2：四层架构 */
+  .layers{display:flex;flex-direction:column;gap:0;align-items:center;}
+  .layer{width:100%;display:flex;gap:12px;align-items:stretch;}
+  .layer .l-label{flex:0 0 120px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;border-radius:10px;}
+  .layer .l-body{flex:1;border-radius:10px;padding:12px;border:1px solid;}
+  .layer .items{display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:center;}
+  .flow-v{display:flex;flex-direction:column;align-items:center;padding:2px 0;color:var(--muted);}
+  .flow-v .a{font-size:22px;line-height:1;}
+  .flow-v .l{font-size:12px;}
+
+  .l-input .l-label{background:var(--slate-soft);color:var(--slate);}
+  .l-input .l-body{border-color:#cbd5e1;background:var(--slate-soft);}
+  .l-oper .l-label{background:var(--blue-soft);color:var(--blue);}
+  .l-oper .l-body{border-color:#bcd2fb;background:var(--blue-soft);}
+  .l-store .l-label{background:var(--green-soft);color:var(--green);}
+  .l-store .l-body{border-color:#b3e0cf;background:var(--green-soft);}
+  .l-reuse .l-label{background:var(--orange-soft);color:var(--orange);}
+  .l-reuse .l-body{border-color:#f0d6a8;background:var(--orange-soft);}
+  .mini{display:inline-block;background:#fff;border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:13px;margin:3px;}
+
+  /* 图3：数据模型 */
+  .dm-grid{display:flex;gap:14px;flex-wrap:wrap;}
+  .dm-grid .ent{flex:1;min-width:240px;border:1px solid var(--line);border-radius:10px;overflow:hidden;}
+  .ent .head{padding:8px 12px;font-weight:700;font-size:14px;color:#fff;}
+  .ent .body{padding:10px 12px;font-size:13px;background:#fff;}
+  .ent .body code{display:block;background:var(--bg);border-radius:6px;padding:6px 8px;margin:4px 0;font-family:Consolas,monospace;font-size:12.5px;}
+  .ent .body .k{color:var(--muted);}
+  .head-anchor{background:var(--purple);} .head-know{background:var(--blue);} .head-net{background:var(--green);}
+  table.matrix{width:100%;border-collapse:collapse;margin-top:6px;font-size:13px;}
+  table.matrix th,table.matrix td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top;}
+  table.matrix th{background:var(--bg);font-weight:600;}
+  table.matrix .hl{background:var(--green-soft);}
+
+  /* 图4：生命周期 */
+  .lc-steps{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;align-items:stretch;}
+  .lc-steps .step{flex:1;min-width:150px;border-radius:10px;padding:10px 12px;border:1px solid;font-size:13px;}
+  .lc-back{margin-top:14px;text-align:center;color:var(--orange);font-weight:600;font-size:14px;}
+
+  /* 表格通用 */
+  table.tbl{width:100%;border-collapse:collapse;font-size:14px;margin:10px 0;}
+  table.tbl th,table.tbl td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top;}
+  table.tbl th{background:var(--bg);font-weight:600;white-space:nowrap;}
+  .pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:600;}
+  .p-blue{background:var(--blue-soft);color:var(--blue);} .p-green{background:var(--green-soft);color:var(--green);}
+  .p-orange{background:var(--orange-soft);color:var(--orange);} .p-purple{background:var(--purple-soft);color:var(--purple);}
+  .p-slate{background:var(--slate-soft);color:var(--slate);}
+
+  ul li,ol li{margin:3px 0;}
+  .foot{color:var(--muted);font-size:13px;margin-top:48px;text-align:center;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <h1>记忆 / 知识管理系统 · 快速上手</h1>
+  <p>让 AI 把「对话」沉淀成「知识」，并在下一次遇到相似问题时自动关联、复用，越用越懂。</p>
+  <p class="tag">新手阅读本页，约 15 分钟 · 建议按 ①→④ 顺序阅读</p>
+</header>
+
+<!-- ==================== 图1 ==================== -->
+<h2><span class="no">①</span>一句话骨架</h2>
+<p class="lead">先记住这一句话，后面所有内容都是它的展开：</p>
+<div class="card">
+  <strong>系统 = 一个锚点 ＋ 三类知识 ＋ 一张网，由四类操作驱动，形成「沉淀 → 关联 → 复用 → 再沉淀」的闭环。</strong>
+</div>
+
+<div class="figure">
+  <div class="fig-title">图 1 · 一句话骨架</div>
+  <div class="fig1-role">
+    <div class="box" style="border-color:#c3b3ee;background:var(--purple-soft);color:var(--purple);">
+      <span class="t">锚点 Anchor</span>
+      <span class="d">对话记录（保真、可溯源）</span>
+    </div>
+    <div class="box" style="border-color:#bcd2fb;background:var(--blue-soft);color:var(--blue);">
+      <span class="t">知识 Knowledge</span>
+      <span class="d">事情 / 经验 / 常识（type × scope）</span>
+    </div>
+    <div class="box" style="border-color:#b3e0cf;background:var(--green-soft);color:var(--green);">
+      <span class="t">网 Network</span>
+      <span class="d">关联（把知识串起来）</span>
+    </div>
+  </div>
+  <div class="loopline">
+    <span class="sep">四个操作驱动</span>
+  </div>
+  <div class="fig1-ops">
+    <span class="op">记忆</span>
+    <span class="op">蒸馏</span>
+    <span class="op">收录</span>
+    <span class="op">关联</span>
+  </div>
+  <div class="loopline">
+    <span>沉淀</span><span class="sep">→</span><span>关联</span><span class="sep">→</span><span>复用</span><span class="sep">→</span><span>再沉淀</span>
+  </div>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">展开解读</h3>
+  <ul>
+    <li><span class="pill p-purple">锚点</span> 每次聊天的<b>完整原始记录</b>，原样保存、不改动。它是一切知识的"根"——任何抽象出来的东西都能回溯到它，所以它也是<b>纠错和可信的最终依据</b>（"权威是原文"）。</li>
+    <li><span class="pill p-blue">知识</span> 从对话中提炼出来的、或你主动告诉 AI 的<b>可复用内容</b>。不是一条条的聊天记录，而是"发生过什么 / 怎么办 / 是什么"这类真正有价值的东西。</li>
+    <li><span class="pill p-green">网</span> 知识不是孤立的——事情、经验、常识之间通过<b>关联</b>互相连接，由一件事可以牵出相关的事。网管"谁连谁"，具体语义放在知识内容里。</li>
+    <li><span class="pill p-blue">四操作</span> 是让系统转起来的<b>四个动作</b>：记忆（存原话）、蒸馏（提炼知识）、收录（你告知）、关联（建立连接）。</li>
+  </ul>
+  <div class="note">一句话本质：<b>这不是一个"聊天记录备份"系统，而是一个"把对话变成可复用经验"的系统。</b>锚点负责保真，知识负责价值，网负责串联。</div>
+</div>
+
+<!-- ==================== 图2 ==================== -->
+<h2><span class="no">②</span>整体架构（四层）</h2>
+<p class="lead">系统从下到上分四层，数据从「输入」流向「存储」，再被「复用」层取出来干活。</p>
+
+<div class="figure">
+  <div class="fig-title">图 2 · 四层架构与数据流转</div>
+  <div class="layers">
+    <div class="layer l-input">
+      <div class="l-label">输入层</div>
+      <div class="l-body"><div class="items">
+        <span class="mini">每次对话</span><span class="mini">你主动告知（流程 / 方案 / 事实）</span>
+      </div></div>
+    </div>
+    <div class="flow-v"><span class="a">↓</span><span class="l">记忆 / 收录</span></div>
+    <div class="layer l-oper">
+      <div class="l-label">操作层</div>
+      <div class="l-body"><div class="items">
+        <span class="mini">记忆</span><span class="arrow" style="font-size:16px;">→</span>
+        <span class="mini">蒸馏</span><span class="arrow" style="font-size:16px;">→</span>
+        <span class="mini">收录</span><span class="arrow" style="font-size:16px;">→</span>
+        <span class="mini">关联</span>
+      </div></div>
+    </div>
+    <div class="flow-v"><span class="a">↓</span><span class="l">写入</span></div>
+    <div class="layer l-store">
+      <div class="l-label">存储层</div>
+      <div class="l-body"><div class="items">
+        <span class="mini" style="border-color:#c3b3ee;color:var(--purple);">锚点 · 对话记录</span>
+        <span class="mini" style="border-color:#bcd2fb;color:var(--blue);">知识 · 事情/经验/常识</span>
+        <span class="mini" style="border-color:#b3e0cf;color:var(--green);">网 · 关联边</span>
+      </div></div>
+    </div>
+    <div class="flow-v"><span class="a">↑</span><span class="l">调出 / 下钻</span></div>
+    <div class="layer l-reuse">
+      <div class="l-label">复用层</div>
+      <div class="l-body"><div class="items">
+        <span class="mini">检索（沿网找到旧知识）</span><span class="arrow" style="font-size:16px;">→</span>
+        <span class="mini">复用（讲当时怎么做的）</span><span class="arrow" style="font-size:16px;">→</span>
+        <span class="mini">修订（按新情况调整）</span><span class="arrow" style="font-size:16px;">→</span>
+        <span class="mini">再沉淀（写回存储层）</span>
+      </div></div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">各层职责</h3>
+  <table class="tbl">
+    <tr><th style="width:90px;">层</th><th>职责</th><th>关键点</th></tr>
+    <tr><td><span class="pill p-slate">输入层</span></td><td>知识的<b>来源</b>：对话自动产生 / 你主动告知</td><td>两种输入管道，来源不同，处理方式不同</td></tr>
+    <tr><td><span class="pill p-blue">操作层</span></td><td>对输入做<b>加工</b>：四类操作决定"怎么进系统"</td><td>记忆全自动；蒸馏第一阶段手动；收录你说了才算；关联自动为主</td></tr>
+    <tr><td><span class="pill p-green">存储层</span></td><td>知识的<b>存放</b>：锚点 / 知识 / 网三个角色</td><td>锚点保真，知识提炼，网串接</td></tr>
+    <tr><td><span class="pill p-orange">复用层</span></td><td>知识的<b>使用</b>：遇到新问题，取旧知识来帮忙（CBR 闭环）</td><td>检索 → 复用 → 修订 → 再沉淀，一次循环让网更密</td></tr>
+  </table>
+
+  <h3>层之间如何流转</h3>
+  <ol>
+    <li><b>输入 → 存储</b>：对话走<b>记忆</b>（每次结束自动落盘成锚点）；你主动告知走<b>收录</b>（直接变成知识）。</li>
+    <li><b>存储内加工</b>：锚点经过<b>蒸馏</b>变成知识；知识之间通过<b>关联</b>挂进网。</li>
+    <li><b>存储 → 复用</b>：新问题来时，复用层<b>沿网检索</b>，从知识下钻到锚点细节。</li>
+    <li><b>复用 → 存储</b>：这次解决过程<b>再沉淀</b>回存储层，网更密、知识更丰富。</li>
+  </ol>
+  <div class="note">四层是<b>逻辑分层</b>，不是四个独立系统——一个会话可能同时在操作层（蒸馏）和存储层（落盘）产生动作。</div>
+</div>
+
+<!-- ==================== 图3 ==================== -->
+<h2><span class="no">③</span>数据模型</h2>
+<p class="lead">系统里只存三样东西：锚点、知识、网。知识的核心是「内容 + 来源 + 类型 + 范围」四个维度。</p>
+
+<div class="figure">
+  <div class="fig-title">图 3 · 数据模型（三个实体的字段）</div>
+  <div class="dm-grid">
+    <div class="ent">
+      <div class="head head-anchor">锚点 Anchor</div>
+      <div class="body">
+        <code><span class="k">content</span> : 完整对话原文</code>
+        <span class="k">特点：保真 · 不可变 · 可溯源</span><br>
+        <span class="k">对应存储：Layer 0/1（原始 JSONL / 可读归档）</span>
+      </div>
+    </div>
+    <div class="ent">
+      <div class="head head-know">知识 Knowledge</div>
+      <div class="body">
+        <code><span class="k">content</span>  : 知识本身（因类型而异）</code>
+        <code><span class="k">sources</span> : List&lt;Source&gt;（可扩展接口）</code>
+        <code><span class="k">type</span>    : EVENT | METHOD | FACT</code>
+        <code><span class="k">scope</span>   : UNIVERSAL | DOMAIN | PERSONAL</code>
+        <code><span class="k">parent</span>  : 可挂靠多个父节点（DAG）</code>
+      </div>
+    </div>
+    <div class="ent">
+      <div class="head head-net">网 Network</div>
+      <div class="body">
+        <code><span class="k">节点</span> = 知识</code>
+        <code><span class="k">边</span> = 挂靠（父子）· 关联（引用）· 溯源（回锚点）</code>
+        <span class="k">原则：网管结构（谁连谁），内容管语义（顺序/逻辑在内容里）</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">知识的两个维度（type × scope）</h3>
+  <p><b>type</b> 回答"这条知识回答什么问题"，<b>scope</b> 回答"它在哪一层成立"。组合起来，就是系统里常见的几类知识：</p>
+  <table class="matrix">
+    <tr><th>scope →<br>type ↓</th><th>UNIVERSAL（普世）</th><th>DOMAIN（项目组/领域）</th><th>PERSONAL（个人）</th></tr>
+    <tr>
+      <td><b>FACT</b><br><small>是什么</small></td>
+      <td class="hl"><b>常识</b><br>中国 34 省级行政区</td>
+      <td class="hl"><b>共识</b><br>XxxController 是需求单入口<br>需求单业务流程</td>
+      <td>个人事实<br>我在订前团队做后端</td>
+    </tr>
+    <tr>
+      <td><b>METHOD</b><br><small>怎么办</small></td>
+      <td>普世方法论<br>TDD：先写测试再实现</td>
+      <td class="hl"><b>经验</b><br>用 AI 做需求开发的标准流程<br>OOM 排查五步法</td>
+      <td>个人习惯<br>我提交代码前的自查清单</td>
+    </tr>
+    <tr>
+      <td><b>EVENT</b><br><small>发生了什么</small></td>
+      <td>（不存在——事件必然特定发生）</td>
+      <td class="hl"><b>事情</b><br>上周完成需求单 XX 新增字段的开发</td>
+      <td>个人经历<br>某次我想通了"知识维度化"</td>
+    </tr>
+  </table>
+  <p style="font-size:13px;color:var(--muted);">一句话记法：<b>事情 = 发生了什么，经验 = 怎么办，常识 = 是什么（普世），共识 = 是什么（项目组内）。</b>新差异 = 加维度值，而不是无限加类别。</p>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">来源（Source）—— 可扩展接口</h3>
+  <p>每条知识都带着自己的<b>来源</b>，来源不是写死的枚举，而是可扩展的接口：</p>
+  <table class="tbl">
+    <tr><th>来源</th><th>含义</th><th>例子</th></tr>
+    <tr><td><span class="pill p-blue">ConversationDistilled</span></td><td>从对话蒸馏提炼出来的</td><td>"需求单流程"是你在讨论中确认的</td></tr>
+    <tr><td><span class="pill p-purple">UserDeclared</span></td><td>你主动告知的</td><td>你说"记住，发布走 UAT→PRE→生产"</td></tr>
+    <tr><td>……（将来可加）</td><td>报告导入、文档导入等</td><td>从历史排障报告导入经验</td></tr>
+  </table>
+  <p style="font-size:13px;color:var(--muted);">一条知识可以同时有<b>多个来源</b>——比如一个经验先由对话蒸馏产生，后来你又主动告知补充过，两个来源共存。</p>
+</div>
+
+<!-- ==================== 图4 ==================== -->
+<h2><span class="no">④</span>生命周期</h2>
+<p class="lead">一条知识从"对话"开始，经历加工、沉淀、复用，最后又沉淀回去——这就是系统的循环。</p>
+
+<div class="figure">
+  <div class="fig-title">图 4 · 生命周期（一次完整循环）</div>
+  <div class="lc-steps">
+    <div class="step" style="border-color:#cbd5e1;background:var(--slate-soft);color:var(--slate);">
+      <b>① 对话发生</b><br><small>你与 AI 讨论 / 你告知信息</small>
+    </div>
+    <div class="arrow" style="align-self:center;">→</div>
+    <div class="step" style="border-color:#c3b3ee;background:var(--purple-soft);color:var(--purple);">
+      <b>② 记忆</b><br><small>会话结束自动落盘<br>→ 锚点（保真原文）</small>
+    </div>
+    <div class="arrow" style="align-self:center;">→</div>
+    <div class="step" style="border-color:#bcd2fb;background:var(--blue-soft);color:var(--blue);">
+      <b>③ 蒸馏 / 收录</b><br><small>你说"帮我蒸馏"<br>→ 事情 / 经验 / 共识</small>
+    </div>
+    <div class="arrow" style="align-self:center;">→</div>
+    <div class="step" style="border-color:#b3e0cf;background:var(--green-soft);color:var(--green);">
+      <b>④ 关联</b><br><small>挂到相关主题 / 环节<br>→ 知识进网</small>
+    </div>
+    <div class="arrow" style="align-self:center;">→</div>
+    <div class="step" style="border-color:#f0d6a8;background:var(--orange-soft);color:var(--orange);">
+      <b>⑤ 复用</b><br><small>下次遇到相似问题<br>沿网调出旧知识</small>
+    </div>
+  </div>
+  <div class="lc-back">↺ 本次新经验再沉淀回 ②③④ → 网越来越密，AI 越来越懂</div>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">每一步的触发时机</h3>
+  <table class="tbl">
+    <tr><th>步骤</th><th>什么时候发生</th><th>谁触发</th></tr>
+    <tr><td>② 记忆</td><td>每次会话结束</td><td>全自动，无需你操作</td></tr>
+    <tr><td>③ 蒸馏</td><td>你主动说"帮我蒸馏"（第一阶段）</td><td>你手动触发；自动化是后续目标</td></tr>
+    <tr><td>③ 收录</td><td>你主动告知一个方案 / 流程 / 事实</td><td>你手动触发</td></tr>
+    <tr><td>④ 关联</td><td>蒸馏 / 收录时自动找相似内容建边，也可手动补</td><td>自动为主 + 手动补</td></tr>
+    <tr><td>⑤ 复用</td><td>下一次提出相似需求 / 问题时</td><td>系统自动沿网检索</td></tr>
+  </table>
+  <div class="note">第一阶段刻意保持<b>手动蒸馏</b>——先验证蒸馏产出质量，再谈自动化。系统对"沉淀了什么"保持可控。</div>
+</div>
+
+<!-- ==================== 例子 ==================== -->
+<h2>⑤ 一个完整例子（需求单场景走一遍）</h2>
+<p class="lead">把前面四张图串起来：用你最熟悉的"需求单"业务看全流程。</p>
+
+<div class="card">
+  <h3 style="margin-top:0;">第一次：收录业务流程（一次，永久生效）</h3>
+  <ol>
+    <li>你告诉 AI："需求单业务流程是：用户提交需求单 → 服务商报价 → 领导审批 → 客户选方案 → 供应商出票，里面有很多细节。"</li>
+    <li><span class="pill p-blue">收录</span>触发 → 生成一条知识：
+      <code style="display:block;background:var(--bg);border-radius:6px;padding:6px 10px;margin:6px 0;font-size:13px;">
+        类型=FACT · 范围=DOMAIN（共识）· 来源=UserDeclared · 内容=需求单业务流程
+      </code>
+    </li>
+    <li>流程是<b>层级结构</b>：总流程是父知识，每个环节（提交/报价/审批/选方案/出票）是子知识，<b>挂靠</b>在父知识下面；执行<b>顺序写在父知识内容里</b>（①提交→②报价→③审批→…）。</li>
+    <li>每个环节节点关联到对应<b>代码</b>（如"领导审批"→审批相关 Controller），形成"业务环节 ↔ 代码"的关联。</li>
+  </ol>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">第二次：下次说"改需求单"（复用闭环）</h3>
+  <ol>
+    <li>你新建一个会话，说："我要改需求单相关的需求。"</li>
+    <li>系统沿<b>网</b>找到〔需求单业务流程〕共识节点 → 你指"我想改『领导审批』环节" → 定位到环节细节 → 沿关联下钻到审批相关代码。</li>
+    <li>AI 结合<b>上次的开发经验</b>（经验：用 AI 做需求开发的标准流程）和<b>锚点里的细节</b>，直接进入讨论，不用你再讲一遍流程。</li>
+    <li>开发完成后，这次过程<b>再沉淀</b>成新的"事情"，挂回需求单主题 → 网更密。</li>
+  </ol>
+  <div class="note">对比你现在的痛点：<b>"每次都要重新讲一遍流程"被彻底消除</b>——因为流程已经作为共识沉淀在网里，下次自动关联。</div>
+</div>
+
+<!-- ==================== 术语表 ==================== -->
+<h2>⑥ 术语表</h2>
+<div class="card">
+  <table class="tbl">
+    <tr><th style="width:170px;">术语</th><th>含义</th></tr>
+    <tr><td><span class="pill p-purple">锚点 Anchor</span></td><td>对话原始记录，保真、不可变，一切知识的可溯源根</td></tr>
+    <tr><td><span class="pill p-blue">事情 Event</span></td><td>type=EVENT，一次具体发生的事，带情境与时间</td></tr>
+    <tr><td><span class="pill p-blue">经验 Experience</span></td><td>type=METHOD，可复用的方法/流程，来源可为蒸馏或告知</td></tr>
+    <tr><td><span class="pill p-blue">常识 Common Sense</span></td><td>type=FACT × scope=UNIVERSAL，普世事实</td></tr>
+    <tr><td><span class="pill p-blue">共识 Consensus</span></td><td>type=FACT/METHOD × scope=DOMAIN，项目组内达成的一致认知（代码、业务流程、约定）</td></tr>
+    <tr><td><span class="pill p-green">网 Network</span></td><td>知识节点 + 关联边；网管结构，内容管语义</td></tr>
+    <tr><td><span class="pill p-blue">记忆</span></td><td>操作：对话 → 锚点（自动保真）</td></tr>
+    <tr><td><span class="pill p-blue">蒸馏</span></td><td>操作：锚点/解决过程 → 事情/经验（第一阶段手动）</td></tr>
+    <tr><td><span class="pill p-blue">收录</span></td><td>操作：你主动告知 → 经验/常识/共识（直接写入）</td></tr>
+    <tr><td><span class="pill p-blue">关联</span></td><td>操作：建边挂网（挂靠/关联/溯源）</td></tr>
+    <tr><td><span class="pill p-orange">确认链路</span></td><td>机械阈值 → AI 判断 → 问用户 → 回对原文（逐级收敛，原文是最终权威）</td></tr>
+    <tr><td><span class="pill p-orange">CBR</span></td><td>基于案例推理：Retain 沉淀 / Retrieve 关联 / Reuse 复用 / Revise 修订——本系统的复用框架</td></tr>
+  </table>
+</div>
+
+<div class="foot">
+  记忆/知识管理系统 · 快速上手 · 由问题定义（锚点＋知识＋网 × 四操作）与 3 个实际场景验证推导
+</div>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>记忆/知识管理系统 · 存储设计详解</title>
+<style>
+  :root{
+    --ink:#1f2430; --muted:#5b6472; --line:#d9dde5; --bg:#f4f6f9; --card:#ffffff;
+    --blue:#2563eb; --blue-soft:#eaf1ff;
+    --green:#059669; --green-soft:#e9f7f1;
+    --orange:#d97706; --orange-soft:#fdf3e3;
+    --purple:#7c3aed; --purple-soft:#f1eafe;
+    --slate:#64748b; --slate-soft:#eef2f7;
+    --red:#dc2626; --red-soft:#fdeaea;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:"Microsoft YaHei","PingFang SC","Segoe UI",system-ui,sans-serif;
+    color:var(--ink);background:var(--bg);line-height:1.75;}
+  .wrap{max-width:1080px;margin:0 auto;padding:32px 20px 80px;}
+  header.hero{background:linear-gradient(135deg,#14532d,#059669 60%,#34d399);color:#fff;
+    border-radius:16px;padding:36px 40px;margin-bottom:32px;}
+  header.hero h1{margin:0 0 10px;font-size:28px;}
+  header.hero p{margin:4px 0;font-size:15px;opacity:.94;}
+  header.hero .tag{display:inline-block;margin-top:14px;padding:6px 14px;
+    background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.3);
+    border-radius:999px;font-size:14px;}
+  h2{font-size:22px;margin:52px 0 6px;padding-left:12px;border-left:4px solid var(--green);}
+  h2 .no{color:var(--green);margin-right:6px;}
+  h3{margin:20px 0 8px;font-size:17px;}
+  .lead{color:var(--muted);margin:0 0 16px;font-size:15px;}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;
+    padding:20px 24px;margin:14px 0;box-shadow:0 1px 3px rgba(16,24,40,.05);}
+  .note{background:var(--orange-soft);border:1px solid #f0d6a8;border-radius:8px;
+    padding:12px 16px;font-size:14px;color:#7a4c06;margin:12px 0;}
+  .figure{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:22px;margin:16px 0;}
+  .fig-title{font-weight:600;font-size:15px;color:var(--muted);margin-bottom:14px;text-align:center;}
+  .box{border-radius:10px;padding:10px 14px;border:1px solid;text-align:center;font-size:14px;}
+  .box .t{font-weight:700;font-size:15px;display:block;}
+  .box .d{font-size:12px;opacity:.82;display:block;margin-top:2px;}
+  .arrow{color:var(--muted);font-size:20px;text-align:center;line-height:1;}
+  .row{display:flex;gap:12px;justify-content:center;align-items:center;flex-wrap:wrap;margin:6px 0;}
+  .v-flow{display:flex;flex-direction:column;align-items:center;padding:2px 0;color:var(--muted);}
+  .v-flow .a{font-size:20px;line-height:1;}
+  .v-flow .l{font-size:12px;}
+  .mini{display:inline-block;background:#fff;border:1px solid var(--line);border-radius:8px;
+    padding:6px 10px;font-size:13px;margin:3px;}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;margin:10px 0;}
+  th,td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top;}
+  th{background:var(--bg);font-weight:600;white-space:nowrap;}
+  code{background:var(--bg);border-radius:6px;padding:2px 6px;font-family:Consolas,monospace;font-size:12.5px;}
+  pre{background:#111827;color:#e5e7eb;border-radius:10px;padding:16px 18px;overflow-x:auto;
+    font-family:Consolas,monospace;font-size:13px;line-height:1.6;}
+  pre .c{color:#9ca3af;}
+  .pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:600;}
+  .p-blue{background:var(--blue-soft);color:var(--blue);}
+  .p-green{background:var(--green-soft);color:var(--green);}
+  .p-orange{background:var(--orange-soft);color:var(--orange);}
+  .p-purple{background:var(--purple-soft);color:var(--purple);}
+  .p-slate{background:var(--slate-soft);color:var(--slate);}
+  .p-red{background:var(--red-soft);color:var(--red);}
+  ul,ol{margin:8px 0;} li{margin:3px 0;}
+  .foot{color:var(--muted);font-size:13px;margin-top:48px;text-align:center;}
+  .tbl-wrap{overflow-x:auto;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <h1>记忆/知识管理系统 · 存储设计详解</h1>
+  <p>迭代 1 产出——五张表如何协作、数据如何存进去 / 检索 / 更新、多数据源如何可插拔。</p>
+  <p class="tag">配合《快速上手》阅读 · 这篇讲"数据在库里长什么样、怎么流动"</p>
+</header>
+
+<!-- ==================== ① 选型过程 ==================== -->
+<h2><span class="no">①</span>存储选型过程（为什么这么存）</h2>
+<p class="lead">从"要检索"出发，选引擎、再抽象成接口——底层一次定死，但留可插拔的口子。</p>
+
+<div class="figure">
+  <div class="fig-title">图 1 · 存储选型与多数据源架构</div>
+  <div class="v-flow"><span class="a">▼</span><span class="l">需求：网要能快速检索（关键词 / 语义 / 图遍历）</span></div>
+  <div class="row">
+    <div class="box" style="flex:1;border-color:#f0d6a8;background:var(--orange-soft);color:#7a4c06;">
+      <span class="t">选型评估（6 引擎）</span>
+      <span class="d">SQLite 全覆盖 ✓ | DuckDB 向量弱 | Neo4j 太重 | LanceDB/Chroma 图弱 | 纯文件能力有限</span>
+    </div>
+  </div>
+  <div class="v-flow"><span class="a">▼</span><span class="l">选定</span></div>
+  <div class="row">
+    <div class="box" style="flex:1;border-color:#b3e0cf;background:var(--green-soft);color:var(--green);">
+      <span class="t">SQLite 为默认实现</span>
+      <span class="d">零部署单文件 · FTS5 全文 · sqlite-vec 向量 · 递归 CTE 图遍历</span>
+    </div>
+  </div>
+  <div class="v-flow"><span class="a">▼</span><span class="l">但要求"可换引擎"——抽象成接口</span></div>
+  <div class="row">
+    <div class="box" style="border-color:#bcd2fb;background:var(--blue-soft);color:var(--blue);min-width:220px;">
+      <span class="t">NetworkStore 接口</span>
+      <span class="d">构建：rebuild / upsert<br>检索：query / traverse / semantic</span>
+    </div>
+    <div class="arrow">⇄</div>
+    <div class="box" style="border-color:#b3e0cf;background:var(--green-soft);color:var(--green);">
+      <span class="t">SqliteNetworkStore</span>
+      <span class="d">默认实现 · 5 张表</span>
+    </div>
+    <div class="box" style="border-color:#cbd5e1;background:var(--slate-soft);color:var(--slate);">
+      <span class="t">Neo4jNetworkStore</span>
+      <span class="d">可选 · 配置切换</span>
+    </div>
+    <div class="box" style="border-color:#cbd5e1;background:var(--slate-soft);color:var(--slate);">
+      <span class="t">MemoryNetworkStore</span>
+      <span class="d">内存实现 · 测试用</span>
+    </div>
+  </div>
+  <div class="v-flow"><span class="a">▼</span><span class="l">config 决定用哪个：<code>network_store: sqlite</code></span></div>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">选型要点</h3>
+  <ul>
+    <li><b>底层一次定死</b>：真值 = Markdown 文件；网 = NetworkStore 接口；默认实现 = SQLite；工具层 = Python。</li>
+    <li><b>契约定死、实现开放</b>：换引擎 = 新写一个实现类 + 改配置，上层不动，真值无损（网可重建）。</li>
+    <li><b>五张表是 SqliteNetworkStore 的内部结构</b>——换 Neo4j 时，这五张表不存在，由图库替代，但接口签名不变。</li>
+  </ul>
+</div>
+
+<!-- ==================== ② 五张表 ==================== -->
+<h2><span class="no">②</span>五张表详解（SqliteNetworkStore 内部）</h2>
+<p class="lead">一张"节点表"存知识本体，四张"辅助表"分别支撑：全文、语义、关系、外部引用。</p>
+
+<div class="figure">
+  <div class="fig-title">图 2 · 五张表及关联关系</div>
+  <div class="row">
+    <div class="box" style="min-width:240px;border-color:#c3b3ee;background:var(--purple-soft);color:var(--purple);">
+      <span class="t">nodes 节点表</span>
+      <span class="d">知识本体（真值副本）</span>
+    </div>
+  </div>
+  <div class="row" style="margin-top:8px;">
+    <div class="box" style="flex:1;border-color:#bcd2fb;background:var(--blue-soft);color:var(--blue);">
+      <span class="t">nodes_fts 全文索引</span>
+      <span class="d">FTS5 倒排 · 关键词字面检索</span>
+    </div>
+    <div class="box" style="flex:1;border-color:#bcd2fb;background:var(--blue-soft);color:var(--blue);">
+      <span class="t">nodes_vec 向量索引</span>
+      <span class="d">sqlite-vec · 模糊提示词语义检索</span>
+    </div>
+    <div class="box" style="flex:1;border-color:#b3e0cf;background:var(--green-soft);color:var(--green);">
+      <span class="t">edges 边表</span>
+      <span class="d">网的关系 · 图遍历</span>
+    </div>
+    <div class="box" style="flex:1;border-color:#f0d6a8;background:var(--orange-soft);color:#7a4c06;">
+      <span class="t">external_refs 外部锚点</span>
+      <span class="d">需求单号 / MR / UAT</span>
+    </div>
+  </div>
+  <div class="row" style="margin-top:8px;font-size:13px;color:var(--muted);">
+    <span>nodes_fts / nodes_vec 用 <b>rowid</b> 关联 nodes · edges / external_refs 用 <b>id</b> 关联 nodes</span>
+  </div>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">每张表的作用与字段</h3>
+  <div class="tbl-wrap">
+  <table>
+    <tr><th style="width:150px;">表</th><th>存什么</th><th>解决什么查询</th><th>关键点</th></tr>
+    <tr>
+      <td><span class="pill p-purple">nodes</span></td>
+      <td>id · file · title · <b>summary</b> · type · scope · status · created/updated</td>
+      <td>按 id 取节点、按 type/scope 过滤、取摘要判断</td>
+      <td><b>summary = 判断用摘要</b>（确认"是不是这件事"，不读全文）；<b>无 body</b>——全文只在 md 文件，下钻按 file 读</td>
+    </tr>
+    <tr>
+      <td><span class="pill p-blue">nodes_fts</span></td>
+      <td>倒排索引 + 内容（title + body，rebuild 时从 md 读入）</td>
+      <td><b>关键词字面检索</b>：搜"审批"命中含"审批"的节点</td>
+      <td>FTS5 · trigram 中文分词 · 独立表（自存索引；nodes 无 body）</td>
+    </tr>
+    <tr>
+      <td><span class="pill p-blue">nodes_vec</span></td>
+      <td>每条知识的 embedding 向量（float[N]）</td>
+      <td><b>语义检索</b>：模糊提示词→向量→最近邻节点</td>
+      <td>sqlite-vec 虚拟表；向量由 embedding 服务算出后写入</td>
+    </tr>
+    <tr>
+      <td><span class="pill p-green">edges</span></td>
+      <td>from_id · to_id · edge_type（parent / link / trace）</td>
+      <td><b>图遍历</b>：父子挂靠、关联引用、溯源回锚点</td>
+      <td>from/to 建索引；递归 CTE 多跳</td>
+    </tr>
+    <tr>
+      <td><span class="pill p-orange">external_refs</span></td>
+      <td>node_id · ref_type（idev/mr/uat/url）· ref_value</td>
+      <td>知识 ↔ 外部真实世界</td>
+      <td>需求单号、MR 链接、UAT 地址——不是知识本身，是锚点</td>
+    </tr>
+  </table>
+  </div>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">五张表设计详解（每张表的意义与解决的问题）</h3>
+  <div class="tbl-wrap">
+  <table>
+    <tr><th style="width:130px;">表</th><th style="width:190px;">意义（一句话）</th><th>解决的问题</th><th>关键机制</th></tr>
+    <tr>
+      <td><span class="pill p-purple">nodes</span></td>
+      <td>知识本体的索引化身</td>
+      <td>按 id/type/scope 定位知识、取 summary 判断</td>
+      <td>rowid 是四表关联键；<b>无 body</b>（正文只在 md，避免双份同步）；summary = 判断用摘要（title 扫 → summary 判 → file 钻）</td>
+    </tr>
+    <tr>
+      <td><span class="pill p-blue">nodes_fts</span></td>
+      <td>字面检索（关键词）</td>
+      <td>搜标题词 + 搜正文细节</td>
+      <td>title 与 body 是<b>独立内容源</b>（body 不含标题短语），都索引才两路可搜；<b>trigram</b> 解决中文子串匹配（默认分词对中文整段切）；FTS5 独立表（UPDATE 用 delete+insert）；rowid 关联 nodes</td>
+    </tr>
+    <tr>
+      <td><span class="pill p-blue">nodes_vec</span></td>
+      <td>语义检索（模糊提示词）</td>
+      <td>一句话 / 同义表达 / 语义相关——FTS 字面抓不到的</td>
+      <td>embedding：文本→向量，语义近则距离近；向量输入用 <b>summary</b>（知识精华）；embedding 是外部服务；与 FTS <b>双路召回 + RRF 合并</b>（双路命中者优先）</td>
+    </tr>
+    <tr>
+      <td><span class="pill p-green">edges</span></td>
+      <td>网的关系</td>
+      <td>图遍历：由一件事串联相关事</td>
+      <td>edge_type：parent（挂靠）/ link（关联）/ trace（溯源）；从 frontmatter parents/links 重建；递归 CTE 多跳</td>
+    </tr>
+    <tr>
+      <td><span class="pill p-orange">external_refs</span></td>
+      <td>知识 ↔ 真实世界的桥</td>
+      <td>从知识跳到需求单号 / MR / UAT / URL，落地实际操作</td>
+      <td>ref_type：idev / mr / uat / url；与 edges 区别（内部关系 vs 外部锚）、与 file 区别（库内真值 vs 库外工单）；一对多、可变化</td>
+    </tr>
+  </table>
+  </div>
+
+  <h3 style="margin-top:16px;">三个横切机制</h3>
+  <ul>
+    <li><b>rowid 关联</b>：FTS / vec 用 rowid（物理键）关联 nodes；nodes.id（k-0003）是业务键，供 edges / external_refs 引用</li>
+    <li><b>双路召回</b>：FTS（字面）+ 向量（语义）各自召回 → rowid 并集去重 → RRF 排序 → 图扩展 → 模型读 summary 判断</li>
+    <li><b>三级粒度</b>：title 扫（候选列表）→ summary 判（是不是这件事）→ file/锚点 钻（细节与原文）</li>
+  </ul>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">建表 SQL（实际可执行）</h3>
+<pre><span class="c">-- ============================================</span>
+<span class="c">-- 记忆/知识管理系统 · SqliteNetworkStore 完整表结构</span>
+<span class="c">-- ============================================</span>
+
+<span class="c">-- ① 节点表：每个节点 = 一条知识（真值在 md 文件，此处为可重建副本；无 body）</span>
+CREATE TABLE IF NOT EXISTS nodes (
+  id      TEXT PRIMARY KEY,                              <span class="c">-- 知识唯一标识：k-0003</span>
+  file    TEXT NOT NULL,                                 <span class="c">-- 指向 md 真值：knowledge/k-0003_xxx.md</span>
+  title   TEXT NOT NULL,                                 <span class="c">-- 标题（候选列表一眼扫）</span>
+  summary TEXT,                                          <span class="c">-- 判断用摘要（确认"是不是这件事"，不读全文）</span>
+  type    TEXT NOT NULL CHECK (type IN ('event','method','fact')),
+                                                        <span class="c">-- 认识论类型</span>
+  scope   TEXT NOT NULL CHECK (scope IN ('universal','domain','personal')),
+                                                        <span class="c">-- 成立范围</span>
+  status  TEXT NOT NULL DEFAULT 'draft'
+          CHECK (status IN ('draft','evolving','settled','deprecated')),
+                                                        <span class="c">-- 成熟度</span>
+  created TEXT,                                          <span class="c">-- 创建时间</span>
+  updated TEXT                                           <span class="c">-- 更新时间</span>
+);
+
+<span class="c">-- ② 全文索引：关键词字面检索（FTS5 独立表：自存倒排+内容，rebuild 时从 md 读正文喂入）</span>
+CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
+  title, body,
+  tokenize = 'trigram'         <span class="c">-- 中文子串匹配：搜"需求"命中"需求单"</span>
+);
+
+<span class="c">-- ③ 向量索引：模糊提示词语义检索（sqlite-vec，N = embedding 维度，如 768）</span>
+CREATE VIRTUAL TABLE IF NOT EXISTS nodes_vec USING vec0(
+  embedding float[N]
+);
+
+<span class="c">-- ④ 边表：网的关系（挂靠/关联/溯源）</span>
+CREATE TABLE IF NOT EXISTS edges (
+  from_id   TEXT NOT NULL REFERENCES nodes(id),
+  to_id     TEXT NOT NULL REFERENCES nodes(id),
+  edge_type TEXT NOT NULL CHECK (edge_type IN ('parent','link','trace')),
+  PRIMARY KEY (from_id, to_id, edge_type)
+);
+CREATE INDEX IF NOT EXISTS idx_edges_from ON edges(from_id);
+CREATE INDEX IF NOT EXISTS idx_edges_to   ON edges(to_id);
+
+<span class="c">-- ⑤ 外部锚点：知识 ↔ 外部真实世界（需求单号/MR/UAT/URL）</span>
+CREATE TABLE IF NOT EXISTS external_refs (
+  node_id   TEXT NOT NULL REFERENCES nodes(id),
+  ref_type  TEXT NOT NULL CHECK (ref_type IN ('idev','mr','uat','url')),
+  ref_value TEXT NOT NULL,
+  PRIMARY KEY (node_id, ref_type, ref_value)
+);</pre>
+</div>
+
+<!-- ==================== ③ 数据如何存进去 ==================== -->
+<h2><span class="no">③</span>数据如何存进去（写入路径）</h2>
+<p class="lead">不管知识来自蒸馏还是收录，都先落成 Markdown 真值文件，再从文件重建/增量写入五张表。</p>
+
+<div class="figure">
+  <div class="fig-title">图 3 · 两条入口 → 一条管道（统一真值）</div>
+  <div class="row">
+    <div class="box" style="flex:1;border-color:#cbd5e1;background:var(--slate-soft);color:var(--slate);">
+      <span class="t">入口 A：蒸馏</span>
+      <span class="d">对话 / 解决过程 → 提炼出知识</span>
+    </div>
+    <div class="box" style="flex:1;border-color:#cbd5e1;background:var(--slate-soft);color:var(--slate);">
+      <span class="t">入口 B：收录</span>
+      <span class="d">你主动告知 → 知识</span>
+    </div>
+  </div>
+  <div class="v-flow"><span class="a">▼</span><span class="l">统一：先生成 Markdown 真值文件（frontmatter + 正文）</span></div>
+  <div class="row">
+    <div class="box" style="min-width:280px;border-color:#c3b3ee;background:var(--purple-soft);color:var(--purple);">
+      <span class="t">knowledge/k-0003_需求单业务流程.md</span>
+      <span class="d">frontmatter：id/type/scope/sources/parents/links/<b>summary</b><br>正文：业务流程（顺序在正文）</span>
+    </div>
+  </div>
+  <div class="v-flow"><span class="a">▼</span><span class="l">rebuild（全量）或 upsert（增量）</span></div>
+  <div class="row">
+    <div class="box" style="flex:1;border-color:#bcd2fb;background:var(--blue-soft);color:var(--blue);">
+      <span class="t">解析 frontmatter → nodes</span>
+    </div>
+    <div class="box" style="flex:1;border-color:#bcd2fb;background:var(--blue-soft);color:var(--blue);">
+      <span class="t">正文 → nodes_fts</span>
+    </div>
+    <div class="box" style="flex:1;border-color:#bcd2fb;background:var(--blue-soft);color:var(--blue);">
+      <span class="t">算 embedding → nodes_vec</span>
+    </div>
+    <div class="box" style="flex:1;border-color:#b3e0cf;background:var(--green-soft);color:var(--green);">
+      <span class="t">parents/links → edges</span>
+    </div>
+    <div class="box" style="flex:1;border-color:#f0d6a8;background:var(--orange-soft);color:#7a4c06;">
+      <span class="t">外部引用 → external_refs</span>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">frontmatter 字段规范（md 真值契约，一次定死）</h3>
+  <pre>---
+id: k-0003                    # 统一 k- 前缀 + 序号
+type: fact                    # event | method | fact
+scope: domain                 # universal | domain | personal
+title: 需求单业务流程
+summary: 需求单完整业务流转：用户提交→服务商报价→领导审批→客户选择方案→供应商出票，含各环节细节与代码位置。
+sources:                      # 来源接口，可多个
+  - type: user_declared       # user_declared | conversation_distilled
+    ref: anchors/s-20260814-001.md
+parents: []                   # 多父挂靠（→ edges: parent）
+links:                        # 关联（→ edges: link）
+  - k-0010
+external_refs:                # 外部锚点（idev/mr/uat/url）
+  - type: idev
+    value: idev-8031426
+status: draft                 # 默认 draft，review 后升 settled
+created: 2026-08-14
+updated: 2026-08-14
+---
+正文：业务流程（顺序写在正文里）</pre>
+  <div class="tbl-wrap">
+  <table>
+    <tr><th style="width:110px;">字段</th><th style="width:200px;">取值 / 格式</th><th>说明</th></tr>
+    <tr><td>id</td><td><code>k-0003</code>（统一 k- 前缀+序号）</td><td>跨表关联主键（edges / external_refs / file 命名）</td></tr>
+    <tr><td>type</td><td>event / method / fact</td><td>认识论类型</td></tr>
+    <tr><td>scope</td><td>universal / domain / personal</td><td>成立范围</td></tr>
+    <tr><td>title</td><td>短标题</td><td>候选列表一眼扫</td></tr>
+    <tr><td>summary</td><td>3~5 句</td><td>判断用摘要（确认"是不是这件事"）</td></tr>
+    <tr><td>sources</td><td>[{type, ref}]</td><td>来源接口，可多个（user_declared / conversation_distilled）</td></tr>
+    <tr><td>parents</td><td>[id]</td><td>多父挂靠（DAG）</td></tr>
+    <tr><td>links</td><td>[id]</td><td>关联（relation 细化留作扩展）</td></tr>
+    <tr><td>external_refs</td><td>[{type, value}]</td><td>外部锚点：idev / mr / uat / url</td></tr>
+    <tr><td>status</td><td>draft（默认）…</td><td>draft / evolving / settled / deprecated；review 后升 settled</td></tr>
+    <tr><td>created / updated</td><td>日期</td><td>溯源</td></tr>
+  </table>
+  </div>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">有 md 文件 vs 没有 md 文件</h3>
+  <div class="tbl-wrap">
+  <table>
+    <tr><th style="width:200px;">情况</th><th>怎么处理</th></tr>
+    <tr>
+      <td><b>有 md 文件的知识</b><br><span class="pill p-purple">主通道</span></td>
+      <td>md 文件是<b>真值</b>，五张表是<b>可重建索引</b>。rebuild 时从文件读入全部重建；文件丢了知识才丢，库坏了重建即恢复。</td>
+    </tr>
+    <tr>
+      <td><b>没有 md 文件的知识</b><br><span class="pill p-orange">例外</span></td>
+      <td>设计原则：<b>一律先补落 md 文件</b>（用户直接说"记住这个" → 先生成文件再走同一管道）。因为<b>真值必须人可读、可 review</b>，纯 DB 节点会失去这一保证。若未来确有纯运行时知识，可支持 file 为空的节点（此时 DB 即真值），但非主路径。</td>
+    </tr>
+  </table>
+  </div>
+  <div class="note">为什么统一落文件？——① 你能 review 每条知识；② 文件可 git 版本管理；③ 索引重建有唯一真值源。这正是"真值一次定死"的体现。</div>
+</div>
+
+<!-- ==================== ④ 检索 ==================== -->
+<h2><span class="no">④</span>如何检索（完整场景）</h2>
+<p class="lead">一条提示词，系统走"精确 + 语义"双路召回 → 拿 node id → 沿网扩展 → 模型读摘要判断（不读全文）。</p>
+
+<div class="figure">
+  <div class="fig-title">图 4 · 检索链路（以"改一下审批环节"为例）</div>
+  <div class="row">
+    <div class="box" style="border-color:#f0d6a8;background:var(--orange-soft);color:#7a4c06;min-width:240px;">
+      <span class="t">提示词："改一下审批环节"</span>
+    </div>
+  </div>
+  <div class="row" style="margin-top:8px;">
+    <div class="box" style="flex:1;border-color:#bcd2fb;background:var(--blue-soft);color:var(--blue);">
+      <span class="t">精确路：FTS5</span>
+      <span class="d">MATCH '审批' → rowid 命中</span>
+    </div>
+    <div class="box" style="flex:1;border-color:#bcd2fb;background:var(--blue-soft);color:var(--blue);">
+      <span class="t">语义路：向量</span>
+      <span class="d">提示词→embedding → nodes_vec 最近邻</span>
+    </div>
+  </div>
+  <div class="v-flow"><span class="a">▼</span><span class="l">双路结果合并 → nodes 拿节点（领导审批环节 k-0010）</span></div>
+  <div class="row">
+    <div class="box" style="flex:1;border-color:#b3e0cf;background:var(--green-soft);color:var(--green);">
+      <span class="t">沿 edges 图遍历</span>
+      <span class="d">挂靠：父（需求单流程）<br>关联：代码（审批 Controller）<br>关联：经验（审批流配置方法）</span>
+    </div>
+  </div>
+  <div class="v-flow"><span class="a">▼</span><span class="l">返回候选（id/title/<b>summary</b>/file/type/scope）→ <b>大模型读 summary 判断</b>是不是这件事（不读全文）</span></div>
+  <div class="row">
+    <div class="box" style="flex:1;border-color:#f0d6a8;background:var(--orange-soft);color:#7a4c06;">
+      <span class="t">需要细节 → 按 file 读 md 全文 → 下钻锚点（原始记录）→ 回对原文</span>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">检索的 SQL（系统机械执行）</h3>
+<pre><span class="c">-- 精确路：关键词（FTS5，trigram 支持中文子串）——只取轻量字段，不取 body</span>
+SELECT n.id, n.title, n.summary, n.type, n.scope, n.file
+FROM nodes n
+WHERE n.rowid IN (
+  SELECT rowid FROM nodes_fts WHERE nodes_fts MATCH '审批'
+)
+AND n.type='fact' AND n.scope='domain'        <span class="c">-- 可叠加过滤</span>
+ORDER BY rank LIMIT 10;
+
+<span class="c">-- 语义路：模糊提示词（向量最近邻）</span>
+SELECT n.id, n.title, n.summary, n.file, v.distance
+FROM nodes_vec v JOIN nodes n ON n.rowid = v.rowid
+WHERE v.embedding MATCH :prompt_vec            <span class="c">-- :prompt_vec 由 embedding 服务算出</span>
+ORDER BY v.distance LIMIT 10;
+
+<span class="c">-- 图遍历：从节点沿边扩展（递归 CTE，2 跳）</span>
+WITH RECURSIVE reach(from_id, depth) AS (
+  SELECT 'k-0010', 0
+  UNION ALL
+  SELECT e.to_id, r.depth+1 FROM reach r
+  JOIN edges e ON e.from_id = r.from_id
+  WHERE r.depth < 2
+)
+SELECT * FROM reach;</pre>
+  <p style="font-size:13px;color:var(--muted);">链路 = <b>索引命中（关键词/语义）→ node id → 图扩展 → 模型读 summary 判断 → 确认后按 file 下钻 md/锚点原文</b>。检索归系统（机械），判断归模型（读摘要），锚归原文。三级粒度：<b>title 扫 → summary 判 → file/锚点 钻</b>。</p>
+</div>
+
+<!-- ==================== ⑤ 蒸馏后如何更新 ==================== -->
+<h2><span class="no">⑤</span>蒸馏后数据如何更新</h2>
+<p class="lead">新知识产生 = 增量 upsert；已有知识改版 = 更新该节点 + 重建它的索引与边。</p>
+
+<div class="figure">
+  <div class="fig-title">图 5 · 更新流程（增量，非全量）</div>
+  <div class="row">
+    <div class="box" style="flex:1;border-color:#cbd5e1;background:var(--slate-soft);color:var(--slate);">
+      <span class="t">新知识（蒸馏/收录）</span>
+      <span class="d">生成新 md → upsertNode → upsertEdge</span>
+    </div>
+    <div class="box" style="flex:1;border-color:#cbd5e1;background:var(--slate-soft);color:var(--slate);">
+      <span class="t">知识改版（流程变了）</span>
+      <span class="d">改 md → 更新 nodes + 重建该节点 fts/vec + 更新 edges</span>
+    </div>
+  </div>
+  <div class="v-flow"><span class="a">▼</span><span class="l">全量重建（rebuild）只在需要时跑——如首次、或手动修复</span></div>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">更新要点</h3>
+  <ul>
+    <li><b>增量优先</b>：蒸馏/收录产生一条知识，只 upsert 这一条 + 它的边，不重建全库。</li>
+    <li><b>改版走"成熟度"</b>：流程"短期确定、长期演进"——改版时旧内容留痕（status: deprecated），新版本落新内容，索引同步重建。</li>
+    <li><b>可重建兜底</b>：任何时刻索引出错，跑一次 <code>main.py rebuild</code> 从 md 文件全量恢复，真值无损。</li>
+  </ul>
+</div>
+
+<div class="foot">
+  记忆/知识管理系统 · 存储设计详解 · 迭代 1 产出 · 配合《快速上手》阅读
+</div>
+
+</div>
+</body>
+</html>
