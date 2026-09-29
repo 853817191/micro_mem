@@ -1,0 +1,24 @@
+clients/skill/memory-knowledge/DISTILL_GUIDE.md
+  s_97f5f000893880::t_3ccbc116086573 106
+  s_97f5f000893880::t_24839d7df73d21 68-73
+clients/skill/memory-knowledge/DISTILL_DOMAIN.md
+  s_97f5f000893880::t_45a61c00aa201d 46-47
+clients/skill/memory-knowledge/DISTILL_EVENT.md
+  s_97f5f000893880::t_8b443cb2eda85f 59-60
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.45-trip",
+  "base_commit_sha": "97394847a8375b83312147d2aca1a2025e42580f",
+  "prompts": {},
+  "sessions": {
+    "s_97f5f000893880": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f9b4a843-f7d1-4178-ab7f-8c6328fdeabd",
+        "model": "unknown"
+      },
+      "human_author": "853817191 <853817191@qq.com>"
+    }
+  }
+}
