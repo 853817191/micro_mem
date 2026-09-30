@@ -2,7 +2,7 @@
 
 一致性约定：
 - nodes 与 nodes_fts 用同一个 rowid 对齐（create 时取 lastrowid 回填）
-- FTS5 不支持 UPDATE，改 title/body 用 delete + insert
+- FTS 索引更新用原生 UPDATE，无行时补 INSERT（避免 DELETE+INSERT 在 trigram 下残留旧词）
 - 所有写操作在事务内原子完成
 """
 import json
@@ -80,7 +80,7 @@ class SqliteNetworkStore(NetworkStore):
         self._conn.commit()
 
     def update_node(self, node: NodeRecord, new_body: str = "") -> None:
-        """更新节点；title/body 变化时同步 FTS（FTS5 不支持 UPDATE，用 delete+insert）。"""
+        """更新节点；title/body 变化时同步 FTS（原生 UPDATE，无行时补 INSERT）。"""
         old = self.get_node(node.id)
         if old is None:
             raise KeyError(f"节点不存在: {node.id}")
@@ -99,11 +99,15 @@ class SqliteNetworkStore(NetworkStore):
                 (node.file, node.title, node.summary, node.type,
                  node.scope, node.status, node.updated, node.id))
             # 标题或正文变化 → 重建 FTS 索引
-            # 用 FTS5 原生 UPDATE（自动维护倒排），避免 DELETE+INSERT 在 trigram 下残留旧词
+            # 用 FTS5 原生 UPDATE（自动维护倒排），避免 DELETE+INSERT 在 trigram 下残留旧词；
+            # 若节点创建时 body 为空（无 FTS 行），UPDATE 命中 0 行，需补 INSERT，
+            # 否则补写的 body 永远进不了索引，且重写 md 时读回空 body 会丢真值（B2）
             if old_title != node.title or old_body != new_body:
-                self._conn.execute(
+                cur = self._conn.execute(
                     "UPDATE nodes_fts SET title=?, body=? WHERE rowid=?",
                     (node.title, new_body, old_rowid))
+                if cur.rowcount == 0:
+                    self._fts_insert(old_rowid, node.title, new_body)
 
     def delete_node(self, id: str) -> None:
         """删除节点：连带删除 FTS / edges / external_refs / 向量（保持一致性）。"""

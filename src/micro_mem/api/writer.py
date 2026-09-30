@@ -193,7 +193,9 @@ class MemoryWriter:
             "sources": [{"type": s.type.value, "ref": s.ref} for s in (k.sources or [])],
             "parents": list(k.parents or []),
             "links": list(k.links or []),
-            "external_refs": [{"type": r.type.value, "value": r.value} for r in (k.external_refs or [])],
+            "external_refs": [
+                {"type": r.type.value, "value": r.value} for r in (k.external_refs or [])
+            ],
             "status": k.status.value,
             "created": k.created,
             "updated": k.updated,

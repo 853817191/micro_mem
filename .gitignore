@@ -26,3 +26,10 @@ env/
 
 # 运行产物
 *.log
+candidates.json
+
+# 工具缓存
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.playwright-mcp/

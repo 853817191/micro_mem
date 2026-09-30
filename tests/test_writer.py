@@ -2,7 +2,15 @@
 import os
 
 from micro_mem.api.reader import MemoryReader
-from micro_mem.domain.types import EdgeType, RefType, Source, SourceType
+from micro_mem.domain.types import (
+    EdgeType,
+    Knowledge,
+    KnowledgeType,
+    RefType,
+    Scope,
+    Source,
+    SourceType,
+)
 
 
 def test_w1_create_knowledge_basic(writer, store, config, mk):
@@ -80,3 +88,20 @@ def test_w9_update_preserves_sources(writer, reader, mk):
     assert k.sources, "update 后 sources 被清空"
     assert k.sources[0].ref == "anchors/s-20260929-002.md", "sources.ref 丢失"
     assert k.sources[0].type == SourceType.CONVERSATION_DISTILLED, "sources.type 丢失"
+
+
+def test_w10_update_body_from_empty(writer, reader, store, config):
+    """回归 B2：空 body 创建 → update 补 body → 新 body 必须进索引且不丢真值。
+
+    根因：create(body="") 不建 FTS 行，update 的 FTS UPDATE 命中 0 行静默跳过，
+    随后重写 md 从索引读回空 body 覆盖真值 → 索引和真值双双丢 body。
+    注意不能用 mk fixture（其 body or title 会掩盖空 body 场景）。
+    """
+    kid = writer.create_knowledge(Knowledge(
+        type=KnowledgeType.FACT, scope=Scope.DOMAIN,
+        title="空body回归", summary="s", body=""))
+    writer.update_knowledge(kid, body="独有词uniqueterm")
+    k = reader.get(kid)
+    assert k.body == "独有词uniqueterm", "update 补写的 body 丢失（真值被覆盖）"
+    r_plain = MemoryReader(config, store)  # 纯字面路，排除语义路干扰
+    assert any(h.id == kid for h in r_plain.search("uniqueterm")), "补写的 body 未进索引"
