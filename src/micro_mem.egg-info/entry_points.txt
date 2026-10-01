@@ -1,6 +1,2 @@
 [console_scripts]
-mem = micro_mem.cli.main:main
-mem-build-db = micro_mem.cli.build_db:build
-mem-distill = micro_mem.cli.distill:main
-mem-import-one = micro_mem.cli.import_one:main
-mem-server = micro_mem.cli.server:main
+mem = micro_mem.interfaces.cli:main

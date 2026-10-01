@@ -3,6 +3,7 @@
 与 Markdown 实现对齐的行为约定：
 - 知识 id：k-<序号>（取现有最大序号 +1，四位补零）
 - 锚点 id：s-<yyyymmdd>-<序号>（当日最大序号 +1，三位补零）
+- 计划 id：plan-<yyyymmdd>-<序号>（同锚点规则）
 - 时间戳格式：%Y-%m-%d %H:%M:%S
 - 存取均经副本：调用方改返回值不污染库内状态，反之亦然
 """
@@ -11,7 +12,7 @@ import re
 from datetime import datetime
 
 from ..application.ports import TruthStore
-from ..domain.models import Anchor, Knowledge
+from ..domain.models import Anchor, DistillPlan, Knowledge
 
 _NOW = "%Y-%m-%d %H:%M:%S"
 
@@ -22,6 +23,7 @@ class InMemoryTruthStore(TruthStore):
     def __init__(self) -> None:
         self._knowledge: dict[str, Knowledge] = {}
         self._anchors: dict[str, Anchor] = {}
+        self._plans: dict[str, DistillPlan] = {}
 
     # ---------------- 知识 ----------------
 
@@ -69,6 +71,13 @@ class InMemoryTruthStore(TruthStore):
     def list_anchors(self) -> list[Anchor]:
         return [copy.deepcopy(a) for a in sorted(self._anchors.values(), key=lambda x: x.id)]
 
+    def search_anchors(self, query: str, limit: int = 10) -> list[Anchor]:
+        """子串匹配 title + 正文（按 id 排序，limit 截断）。"""
+        if not query:
+            return []
+        return [a for a in self.list_anchors()
+                if query in a.title or query in a.content][:limit]
+
     def anchor_exists(self, ref: str) -> bool:
         """兼容纯 id / 引用路径 / 任意前缀路径（取 basename 归一化）。"""
         anchor_id = ref.replace("\\", "/").split("/")[-1]
@@ -92,6 +101,31 @@ class InMemoryTruthStore(TruthStore):
         a = self._anchors.get(anchor_id)
         if a is not None:
             a.distilled_until = int(turn)
+
+    # ---------------- 蒸馏计划档案 ----------------
+
+    def save_plan(self, p: DistillPlan) -> str:
+        """id 为空分配 plan-<当日日期>-<序号>；created_at 首存写入。"""
+        if not p.plan_id:
+            date = datetime.now().strftime("%Y%m%d")
+            max_seq = 0
+            for pid in self._plans:
+                m = re.match(rf"plan-{date}-(\d+)$", pid)
+                if m:
+                    max_seq = max(max_seq, int(m.group(1)))
+            p.plan_id = f"plan-{date}-{max_seq + 1:03d}"
+        if not p.created_at:
+            p.created_at = datetime.now().strftime(_NOW)
+        self._plans[p.plan_id] = copy.deepcopy(p)
+        return p.plan_id
+
+    def get_plan(self, plan_id: str) -> DistillPlan | None:
+        p = self._plans.get(plan_id)
+        return copy.deepcopy(p) if p is not None else None
+
+    def list_plans(self) -> list[DistillPlan]:
+        return [copy.deepcopy(p) for p in sorted(self._plans.values(),
+                                                 key=lambda x: x.plan_id)]
 
     # ---------------- id 分配 ----------------
 

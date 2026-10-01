@@ -10,7 +10,7 @@
 """
 from abc import ABC, abstractmethod
 
-from ..domain.models import Anchor, Knowledge, NodeRecord
+from ..domain.models import Anchor, DistillPlan, Knowledge, NodeRecord
 
 
 class TruthStore(ABC):
@@ -72,6 +72,13 @@ class TruthStore(ABC):
         """取全部锚点。"""
 
     @abstractmethod
+    def search_anchors(self, query: str, limit: int = 10) -> list[Anchor]:
+        """锚点检索：title/正文子串匹配（主题驱动的相关锚点清单供给）。
+
+        先具体后抽象：锚点规模小（几十个），子串扫足够；规模上来再升 FTS 表。
+        """
+
+    @abstractmethod
     def anchor_exists(self, ref: str) -> bool:
         """溯源校验：ref 指向的锚点是否存在。
 
@@ -92,6 +99,24 @@ class TruthStore(ABC):
     @abstractmethod
     def set_distill_cursor(self, anchor_id: str, turn: int) -> None:
         """写蒸馏游标。锚点不存在时静默忽略（编排层先 get_anchor 确认存在）。"""
+
+    # ---------------- 蒸馏计划档案 ----------------
+
+    @abstractmethod
+    def save_plan(self, p: DistillPlan) -> str:
+        """保存蒸馏计划：plan_id 为空则分配（plan-<yyyymmdd>-<seq>），否则按 id 覆盖。
+
+        计划是过程档案（负知识载体 + 审计链），与知识/锚点同归真值层管理——
+        data/ 下一切文件读写收口径不变（真值没有家是旧病，不复发）。返回 plan_id。
+        """
+
+    @abstractmethod
+    def get_plan(self, plan_id: str) -> DistillPlan | None:
+        """按 id 取计划；不存在返回 None。"""
+
+    @abstractmethod
+    def list_plans(self) -> list[DistillPlan]:
+        """取全部计划（审计 / 反馈回路统计用）。"""
 
 
 class IndexStore(ABC):

@@ -13,7 +13,7 @@ from ..application.ports import Embedder, IndexStore, TruthStore
 from ..domain.models import EdgeType, ExternalRef, Knowledge, NodeRecord, Status
 
 # update 可改字段（None = 不变）
-_UPDATABLE = ("title", "summary", "body", "status", "type", "scope",
+_UPDATABLE = ("title", "summary", "body", "status", "type", "scope", "aspect",
               "sources", "parents", "links", "external_refs")
 # 边类型 → Knowledge 关联字段（trace 无真值字段，仅索引层）
 _EDGE_FIELD = {EdgeType.PARENT.value: "parents", EdgeType.LINK.value: "links"}
@@ -116,7 +116,8 @@ class KnowledgeService:
         node = NodeRecord(
             id=k.id, file=self._truth.knowledge_ref(k.id), title=k.title,
             summary=k.summary, type=k.type.value, scope=k.scope.value,
-            status=k.status.value, created=k.created, updated=k.updated)
+            status=k.status.value, created=k.created, updated=k.updated,
+            aspect=k.aspect)
         self._index.upsert_node(node, body=k.body)
         # 边全量替换（parent/link；不动 trace）
         for to_id, et in self._index.get_edges(kid, list(_EDGE_FIELD)):

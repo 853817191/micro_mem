@@ -18,6 +18,16 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "data_dir": "./data",
     "embedding_dim": 1024,
     "search": {"semantic_fallback": "on_zero_hit"},
+    # distill 节：aspects=切面值域；其余为 R1 视图预算参数
+    # （与 application/distill_view.py 的 DEFAULTS 保持一致，改要同步）
+    "distill": {
+        "aspects": ["flow", "structure", "boundary", "constraint"],
+        "context_budget_chars": 100000,   # 增量总字符预算：超了才触发压缩
+        "assistant_chars": 300,           # 压缩时 assistant 段保留字符数
+        "tool_input_chars": 100,          # 压缩时 tool_use 入参保留字符数
+        "preretrieve_hits": 10,           # 预检索召回命中上限
+        "subtree_max": 30,                # 预检索子树总量上限
+    },
 }
 
 
@@ -92,6 +102,19 @@ class Config:
             raise ValueError(
                 f"search.semantic_fallback 非法值 {value!r}，可选: {SEMANTIC_FALLBACKS}")
         return value
+
+    @property
+    def distill_aspects(self) -> list[str]:
+        """领域切面值域（蒸馏计划校验用；可扩展——加轴改配置不改代码）。"""
+        return list((self._data.get("distill") or {}).get("aspects") or [])
+
+    @property
+    def distill_view(self) -> dict[str, int]:
+        """R1 视图预算参数（键集合见 application/distill_view.py DEFAULTS）。"""
+        d = (self._data.get("distill") or {})
+        return {k: int(d[k]) for k in (
+            "context_budget_chars", "assistant_chars", "tool_input_chars",
+            "preretrieve_hits", "subtree_max") if k in d}
 
     # ---------------- 派生路径 ----------------
 

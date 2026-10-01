@@ -7,11 +7,13 @@
 文件形态：
 - 知识：knowledge/k-<id>_<安全标题>.md（yaml frontmatter + 空行 + body）
 - 锚点：anchors/s-<yyyymmdd>-<序号>.md（定序行 frontmatter + 空行 + 正文）
+- 计划：plans/plan-<yyyymmdd>-<序号>.json（机器档案，JSON 不落 md）
 
 游标/重同步用正则定点改写 frontmatter 文本（不重排其他字段的字节），
 保真是锚点的第一职责。
 """
 import glob
+import json
 import os
 import re
 from datetime import datetime
@@ -21,6 +23,7 @@ import yaml
 from ..application.ports import TruthStore
 from ..domain.models import (
     Anchor,
+    DistillPlan,
     ExternalRef,
     Knowledge,
     KnowledgeType,
@@ -42,8 +45,10 @@ class MarkdownTruthStore(TruthStore):
         self._data_dir = data_dir
         self._knowledge_dir = os.path.join(data_dir, "knowledge")
         self._anchors_dir = os.path.join(data_dir, "anchors")
+        self._plans_dir = os.path.join(data_dir, "plans")
         os.makedirs(self._knowledge_dir, exist_ok=True)
         os.makedirs(self._anchors_dir, exist_ok=True)
+        os.makedirs(self._plans_dir, exist_ok=True)
 
     # ================= 知识 =================
 
@@ -118,11 +123,18 @@ class MarkdownTruthStore(TruthStore):
         return f"k-{max_seq + 1:04d}"
 
     def _render_knowledge(self, k: Knowledge) -> str:
-        """序列化为 md 文本（frontmatter 字段/顺序/转义与旧版字节级一致，红线）。"""
-        meta = {
+        """序列化为 md 文本（frontmatter 字段/顺序/转义与旧版字节级一致，红线）。
+
+        aspect 为空不写入：存量知识重写字节不变，仅领域树节点带此字段。
+        """
+        meta: dict = {
             "id": k.id,
             "type": k.type.value,
             "scope": k.scope.value,
+        }
+        if k.aspect:
+            meta["aspect"] = k.aspect
+        meta.update({
             "title": k.title,
             "summary": k.summary or "",
             "sources": [s.to_dict() for s in k.sources],
@@ -132,7 +144,7 @@ class MarkdownTruthStore(TruthStore):
             "status": k.status.value,
             "created": k.created,
             "updated": k.updated,
-        }
+        })
         fm = yaml.safe_dump(meta, allow_unicode=True, sort_keys=False)
         return f"---\n{fm}---\n\n{k.body or ''}"
 
@@ -148,14 +160,17 @@ class MarkdownTruthStore(TruthStore):
             summary=meta.get("summary", ""),
             body=body,
             sources=[Source(SourceType(s.get("type", SourceType.CONVERSATION_DISTILLED.value)),
-                            s.get("ref", "")) for s in (meta.get("sources") or [])],
+                            s.get("ref", ""),
+                            [int(t) for t in (s.get("turns") or [])])
+                     for s in (meta.get("sources") or [])],
             parents=list(meta.get("parents") or []),
             links=list(meta.get("links") or []),
             external_refs=[ExternalRef(RefType(r["type"]), r["value"])
                            for r in (meta.get("external_refs") or [])],
             status=Status(meta.get("status", "draft")),
             created=str(meta.get("created", "")),
-            updated=str(meta.get("updated", "")))
+            updated=str(meta.get("updated", "")),
+            aspect=str(meta.get("aspect", "") or ""))
 
     # ================= 锚点 =================
 
@@ -204,6 +219,18 @@ class MarkdownTruthStore(TruthStore):
             if anchor is not None:
                 result.append(anchor)
         return result
+
+    def search_anchors(self, query: str, limit: int = 10) -> list[Anchor]:
+        """子串匹配 title + 正文（逐文件读；锚点规模小，暂不上 FTS 表）。"""
+        if not query:
+            return []
+        hits: list[Anchor] = []
+        for a in self.list_anchors():
+            if query in a.title or query in a.content:
+                hits.append(a)
+                if len(hits) >= limit:
+                    break
+        return hits
 
     def anchor_exists(self, ref: str) -> bool:
         """兼容纯 id / 引用路径 / 任意前缀路径（取 basename 归一化）。"""
@@ -269,6 +296,45 @@ class MarkdownTruthStore(TruthStore):
             return int(m.group(1))
         except ValueError:
             return -1
+
+    # ================= 蒸馏计划档案 =================
+
+    def save_plan(self, p: DistillPlan) -> str:
+        """保存计划：id 空则分配 plan-<当日>-<序号>；JSON 落盘（机器档案，非人读真值）。"""
+        if not p.plan_id:
+            p.plan_id = self._next_plan_id()
+        if not p.created_at:
+            p.created_at = datetime.now().strftime(_NOW)
+        path = os.path.join(self._plans_dir, f"{p.plan_id}.json")
+        self._write_text(path, json.dumps(p.to_dict(), ensure_ascii=False, indent=2))
+        return p.plan_id
+
+    def get_plan(self, plan_id: str) -> DistillPlan | None:
+        """按 id 读计划；不存在返回 None。"""
+        path = os.path.join(self._plans_dir, f"{plan_id}.json")
+        if not os.path.exists(path):
+            return None
+        with open(path, encoding="utf-8") as f:
+            return DistillPlan.from_dict(json.load(f))
+
+    def list_plans(self) -> list[DistillPlan]:
+        """全量计划（按文件名排序保证确定性）。"""
+        result = []
+        for path in sorted(glob.glob(os.path.join(self._plans_dir, "plan-*.json"))):
+            with open(path, encoding="utf-8") as f:
+                result.append(DistillPlan.from_dict(json.load(f)))
+        return result
+
+    def _next_plan_id(self) -> str:
+        """plan-<yyyymmdd>-<序号>：取当日最大序号 +1（三位补零），与锚点 id 规则同构。"""
+        date = datetime.now().strftime("%Y%m%d")
+        max_seq = 0
+        pattern = os.path.join(self._plans_dir, f"plan-{date}-*.json")
+        for path in glob.glob(pattern):
+            m = re.match(rf"plan-{date}-(\d+)", os.path.basename(path))
+            if m:
+                max_seq = max(max_seq, int(m.group(1)))
+        return f"plan-{date}-{max_seq + 1:03d}"
 
     # ---------------- 通用私有 ----------------
 

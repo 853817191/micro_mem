@@ -32,7 +32,8 @@ class RebuildService:
             node = NodeRecord(
                 id=k.id, file=self._truth.knowledge_ref(k.id), title=k.title,
                 summary=k.summary, type=k.type.value, scope=k.scope.value,
-                status=k.status.value, created=k.created, updated=k.updated)
+                status=k.status.value, created=k.created, updated=k.updated,
+                aspect=k.aspect)
             self._index.upsert_node(node, body=k.body)
             for parent in k.parents:
                 self._index.add_edge(k.id, parent, EdgeType.PARENT.value)

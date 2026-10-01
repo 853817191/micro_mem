@@ -84,6 +84,56 @@ class SearchService:
             return None
         return self._truth.get_knowledge(id)
 
+    # ---------------- 蒸馏供给 ----------------
+
+    def related_subtree(self, query: str, hit_limit: int = 10,
+                        max_nodes: int = 30) -> list[Knowledge]:
+        """子树预检索（蒸馏 R1 供给）：两路召回 → 补祖先链 + 命中节点的直接子节点。
+
+        召回（precision 优先，并集去重）：
+        ① 标题包含——对话点名的节点一定相关（FTS 整句短语对中文长查询零命中，
+          此路是 CJK 场景的主力召回）；② FTS 短语检索（短查询场景补充）。
+        只圈 model/domain 活跃树（蒸馏计划的坐标参照系）；
+        组装经 get（D6 读路径收口），返回供轻量字段展示（不带 body）。
+        """
+        if not query.strip():
+            return []
+        hit_ids: list[str] = []
+        for n in self._index.get_all_nodes():
+            if (n.type == KnowledgeType.MODEL.value
+                    and n.scope == Scope.DOMAIN.value
+                    and n.status != "deprecated"
+                    and len(n.title) >= 2 and n.title in query):
+                hit_ids.append(n.id)
+        # ② FTS 字面（直连 index——坐标参照系只要字面证据，
+        #    不走 HashEmbedder 假语义兜底，防灌入无关节点误导 AI 填坐标）
+        for n in self._index.search_keyword(
+                query, limit=hit_limit,
+                type_filter=KnowledgeType.MODEL.value,
+                scope_filter=Scope.DOMAIN.value):
+            if n.id not in hit_ids:
+                hit_ids.append(n.id)
+        # parent 边方向：子 → 父；反查得各节点的直接子节点
+        children_of: dict[str, list[str]] = {}
+        for from_id, to_id, et in self._index.get_all_edges():
+            if et == EdgeType.PARENT.value:
+                children_of.setdefault(to_id, []).append(from_id)
+        picked: dict[str, Knowledge] = {}
+        queue = hit_ids[:hit_limit]
+        expand_children = set(queue)      # 只有命中节点扩展子节点（祖先不扩，防爆）
+        while queue and len(picked) < max_nodes:
+            kid = queue.pop(0)
+            if kid in picked:
+                continue
+            k = self.get(kid)
+            if k is None:
+                continue
+            picked[kid] = k
+            queue.extend(p for p in k.parents if p not in picked)        # 祖先链到根
+            if kid in expand_children:
+                queue.extend(c for c in children_of.get(kid, []) if c not in picked)
+        return list(picked.values())
+
     # ---------------- 私有 ----------------
 
     def _should_run_semantic(self, kw_nodes: list[NodeRecord]) -> bool:

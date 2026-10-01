@@ -164,12 +164,14 @@ def make_handler(components: Components) -> type[BaseHTTPRequestHandler]:
                 return {"error": f"节点不存在: {node_id}"}
             return {
                 "id": k.id, "type": k.type.value, "scope": k.scope.value,
+                "aspect": k.aspect,
                 "title": k.title, "summary": k.summary, "body": k.body,
                 "status": k.status.value, "created": k.created, "updated": k.updated,
                 "parents": k.parents, "links": k.links,
                 "external_refs": [{"type": r.type.value, "value": r.value}
                                   for r in k.external_refs],
-                "sources": [{"type": s.type.value, "ref": s.ref} for s in k.sources],
+                "sources": [{"type": s.type.value, "ref": s.ref, "turns": s.turns}
+                            for s in k.sources],
             }
 
         def _api_anchor(self, anchor_id: str) -> dict:

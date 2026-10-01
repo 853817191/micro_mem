@@ -60,8 +60,15 @@ class SqliteIndexStore(IndexStore):
             return False
 
     def _ensure_schema(self) -> None:
-        """首次连接执行包内 schema.sql（IF NOT EXISTS，幂等）；向量可用时建 nodes_vec。"""
+        """首次连接执行包内 schema.sql（IF NOT EXISTS，幂等）；向量可用时建 nodes_vec。
+
+        既有库轻量迁移：IF NOT EXISTS 不管已有表的新列，按 PRAGMA 检测补齐。
+        """
         self._conn.executescript(_load_schema())
+        cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(nodes)")}
+        if "aspect" not in cols:
+            self._conn.execute(
+                "ALTER TABLE nodes ADD COLUMN aspect TEXT NOT NULL DEFAULT ''")
         if self._vec_available:
             self._conn.execute(
                 f"CREATE VIRTUAL TABLE IF NOT EXISTS nodes_vec "
@@ -79,13 +86,13 @@ class SqliteIndexStore(IndexStore):
         with self._conn:
             self._conn.execute(
                 "INSERT INTO nodes(id, file, title, summary, type, scope, status, "
-                "created, updated) VALUES(?,?,?,?,?,?,?,?,?) "
+                "aspect, created, updated) VALUES(?,?,?,?,?,?,?,?,?,?) "
                 "ON CONFLICT(id) DO UPDATE SET file=excluded.file, "
                 "title=excluded.title, summary=excluded.summary, type=excluded.type, "
-                "scope=excluded.scope, status=excluded.status, "
+                "scope=excluded.scope, status=excluded.status, aspect=excluded.aspect, "
                 "created=excluded.created, updated=excluded.updated",
                 (node.id, node.file, node.title, node.summary, node.type,
-                 node.scope, node.status, node.created, node.updated))
+                 node.scope, node.status, node.aspect, node.created, node.updated))
             rowid = self._rowid_of(node.id)
             assert rowid is not None  # 刚 upsert 写入，必然存在
             cur = self._conn.execute(
@@ -355,7 +362,7 @@ class SqliteIndexStore(IndexStore):
         return NodeRecord(
             id=row["id"], file=row["file"], title=row["title"], summary=row["summary"],
             type=row["type"], scope=row["scope"], status=row["status"],
-            created=row["created"], updated=row["updated"])
+            created=row["created"], updated=row["updated"], aspect=row["aspect"])
 
     def _fts_insert(self, rowid: int, title: str, body: str) -> None:
         """FTS5 插入新索引。"""

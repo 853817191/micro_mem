@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS nodes (
   scope   TEXT NOT NULL CHECK (scope IN ('universal','domain','personal')),
   status  TEXT NOT NULL DEFAULT 'draft'
           CHECK (status IN ('draft','evolving','settled','deprecated')),
+  aspect  TEXT NOT NULL DEFAULT '',   -- 领域切面：flow|structure|boundary|constraint|…（值域规则层约定，可扩展）
   created TEXT,
   updated TEXT
 );

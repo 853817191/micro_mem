@@ -58,13 +58,6 @@ class SourceType(Enum):
     CONVERSATION_DISTILLED = "conversation_distilled"  # 对话蒸馏
 
 
-class Decision(Enum):
-    """蒸馏候选的 review 结果。"""
-    KEEP = "keep"                # 保留
-    EDIT = "edit"                # 修改后保留
-    REJECT = "reject"            # 不要
-
-
 # 语义兜底策略合法值（D8，领域语言；config 解析与 SearchService 共用）
 SEMANTIC_FALLBACKS = ("on_zero_hit", "always", "off")
 
@@ -74,19 +67,27 @@ SEMANTIC_FALLBACKS = ("on_zero_hit", "always", "off")
 
 @dataclass
 class Source:
-    """知识来源：类型 + 锚点引用。"""
+    """知识来源：类型 + 锚点引用 + 可选的轮次级定位。
+
+    turns：溯源到锚点内的具体轮次号（如 [3, 4]）；空 = 锚点整段。
+    """
     type: SourceType
     ref: str = ""
+    turns: list[int] = field(default_factory=list)
 
     def to_dict(self) -> dict:
-        """转 dict（与 from_dict 对称）。"""
-        return {"type": self.type.value, "ref": self.ref}
+        """转 dict（与 from_dict 对称；turns 为空不输出，保持 frontmatter 干净）。"""
+        d: dict = {"type": self.type.value, "ref": self.ref}
+        if self.turns:
+            d["turns"] = list(self.turns)
+        return d
 
     @classmethod
     def from_dict(cls, d: dict) -> Source:
         """从 dict 还原。"""
         return cls(SourceType(d.get("type", SourceType.CONVERSATION_DISTILLED.value)),
-                   d.get("ref", ""))
+                   d.get("ref", ""),
+                   [int(t) for t in (d.get("turns") or [])])
 
 
 @dataclass
@@ -127,6 +128,8 @@ class Knowledge:
     id: str = ""
     created: str = ""
     updated: str = ""
+    aspect: str = ""    # 领域切面（组织维度）：flow|structure|boundary|constraint|…
+                        # 值域规则层约定、可扩展；空 = 非领域树节点 / 领域根
 
     def to_dict(self) -> dict:
         """转 dict（全字段，与 from_dict 对称）。
@@ -147,6 +150,7 @@ class Knowledge:
             "status": self.status.value,
             "created": self.created,
             "updated": self.updated,
+            "aspect": self.aspect,
         }
 
     @classmethod
@@ -166,6 +170,7 @@ class Knowledge:
             status=Status(d.get("status", Status.DRAFT.value)),
             created=d.get("created", ""),
             updated=d.get("updated", ""),
+            aspect=d.get("aspect", ""),
         )
 
 
@@ -203,58 +208,190 @@ class Anchor:
         )
 
 
-# ==================== 蒸馏候选 ====================
+# ==================== 蒸馏计划（v2 契约） ====================
+
+
+class PlanAction(Enum):
+    """计划项动作：素材命运的全集（蒸馏判断的产出就这三种）。"""
+    CREATE = "create"            # 新建知识节点
+    EDIT = "edit"                # 更新已有节点
+    SKIP = "skip"                # 明确不蒸（负知识留痕，治"悄悄漏掉 vs 明确不蒸"之辨）
+
+
+class DistillDriver(Enum):
+    """驱动方式：数据从哪来。"""
+    SESSION = "session"          # 会话驱动：增量维护（mem distill <anchor>）
+    TOPIC = "topic"              # 主题驱动：盘点建树（mem distill --domain）
+
+
+class DistillMode(Enum):
+    """蒸馏模式：蒸成什么形态（校验器按此选规则集）。"""
+    DOMAIN = "domain"            # 领域蒸馏（本期实现）
+    EVENT = "event"              # 事件蒸馏（预留枚举位，不实现——先具体后抽象）
+
+
+class ItemResult(Enum):
+    """计划项的落库结果（confirm 回写）。"""
+    CREATED = "created"
+    EDITED = "edited"
+    SKIPPED = "skipped"
+
+
+# parent 字段的保留字：引用本次计划新建的领域根（confirm 先落根再替换为实际 id）——
+# 旧流程 MAIN 两段式 hack 的正式化：显式、只在新建根时出现、经计划审查
+ROOT_PLACEHOLDER = "$ROOT"
+
+# 计划状态机：draft（AI 手写）→ approved（submit 归档）→ confirmed（confirm 落库回写）
+PLAN_STATUSES = ("draft", "approved", "confirmed")
 
 
 @dataclass
-class DistillCandidate:
-    """蒸馏产出的单条候选：知识本体 + 关联建议 + review 结果。
+class DomainRoot:
+    """计划挂靠的领域根声明。
 
-    type/scope/title/summary/body 知识本体（AI 产出，review 可改）；
-    suggested_parents/suggested_links 关联建议（AI 给出，review 可改）；
-    decision=EDIT 时 edit_id 指向被更新的已有知识 id。
+    action=existing：挂到已有领域根（id 必填）；
+    action=create：新建领域根（title/summary/body 填全，confirm 先落库）。
     """
-    type: KnowledgeType
-    scope: Scope
-    title: str
+    action: str = ""             # "existing" | "create"（空值由校验器拦截提示）
+    id: str = ""
+    title: str = ""
     summary: str = ""
     body: str = ""
-    suggested_parents: list[str] = field(default_factory=list)
-    suggested_links: list[str] = field(default_factory=list)
-    sources: list[Source] = field(default_factory=list)
-    decision: Decision = Decision.KEEP
-    edit_id: str = ""
 
     def to_dict(self) -> dict:
-        """转 dict（便于命令行/JSON 传递候选）。"""
+        """转 dict（与 from_dict 对称；空字段不输出，保持计划文件干净）。"""
+        d: dict = {"action": self.action}
+        if self.id:
+            d["id"] = self.id
+        if self.title:
+            d["title"] = self.title
+        if self.summary:
+            d["summary"] = self.summary
+        if self.body:
+            d["body"] = self.body
+        return d
+
+    @classmethod
+    def from_dict(cls, d: dict) -> DomainRoot:
+        """从 dict 还原。"""
+        return cls(action=d.get("action", ""), id=d.get("id", ""),
+                   title=d.get("title", ""), summary=d.get("summary", ""),
+                   body=d.get("body", ""))
+
+
+@dataclass
+class PlanItem:
+    """蒸馏计划的单条项，按多轮协议逐段填充：
+
+    R1 定位：action/gist/坐标（parent|edit_id, aspect）/source（锚点+轮次）
+    R3 成型：title/summary/body（edit 项全量替换语义，不留"缺省=不变"暧昧）
+    R4 回写：result/result_knowledge_id（落库结果，计划成为审计档案）
+    """
+    action: PlanAction
+    gist: str = ""                           # 一句话概要（R2 审查对象）
+    source_anchor: str = ""                  # 来源锚点（skip 也必填——它正是"哪几轮不蒸"的载体）
+    source_turns: list[int] = field(default_factory=list)
+    # create 坐标
+    title: str = ""
+    aspect: str = ""                         # 领域切面（值域 config 可配）
+    parent: str = ""                         # 父节点 id 或 "$ROOT"
+    # edit 坐标
+    edit_id: str = ""
+    # R3 填充的正文
+    summary: str = ""
+    body: str = ""
+    # R4 回写
+    result: ItemResult | None = None
+    result_knowledge_id: str = ""
+
+    def to_dict(self) -> dict:
+        """转 dict——落盘形态即契约形态（嵌套 source，AI 手写/人审友好）。"""
+        source: dict = {"anchor": self.source_anchor}
+        if self.source_turns:
+            source["turns"] = list(self.source_turns)
+        d: dict = {"action": self.action.value, "gist": self.gist, "source": source}
+        if self.title:
+            d["title"] = self.title
+        if self.aspect:
+            d["aspect"] = self.aspect
+        if self.parent:
+            d["parent"] = self.parent
+        if self.edit_id:
+            d["edit_id"] = self.edit_id
+        if self.summary:
+            d["summary"] = self.summary
+        if self.body:
+            d["body"] = self.body
+        if self.result is not None:
+            d["result"] = {"status": self.result.value,
+                           "knowledge_id": self.result_knowledge_id}
+        return d
+
+    @classmethod
+    def from_dict(cls, d: dict) -> PlanItem:
+        """从 dict 还原（与 to_dict 对称）。"""
+        source = d.get("source") or {}
+        result = d.get("result") or {}
+        return cls(
+            action=PlanAction(d.get("action", PlanAction.CREATE.value)),
+            gist=d.get("gist", ""),
+            source_anchor=source.get("anchor", ""),
+            source_turns=[int(t) for t in (source.get("turns") or [])],
+            title=d.get("title", ""),
+            aspect=d.get("aspect", ""),
+            parent=d.get("parent", ""),
+            edit_id=d.get("edit_id", ""),
+            summary=d.get("summary", ""),
+            body=d.get("body", ""),
+            result=ItemResult(result["status"]) if result.get("status") else None,
+            result_knowledge_id=result.get("knowledge_id", ""))
+
+
+@dataclass
+class DistillPlan:
+    """蒸馏计划：多轮协议的中间产物与审计档案（负知识载体）。
+
+    单文件演进：draft（R1 定位）→ approved（R2 批准归档，系统回填 expected_turns）
+    → elaborated（R3 逐项填正文，文件原地更新）→ confirmed（R4 落库回写 result）。
+    expected_turns：submit 时系统回填的增量轮次全集，confirm 的轮次覆盖校验基线。
+    """
+    plan_id: str = ""            # TruthStore 分配：plan-<yyyymmdd>-<seq>
+    driver: DistillDriver = DistillDriver.SESSION
+    mode: DistillMode = DistillMode.DOMAIN
+    domain_root: DomainRoot = field(default_factory=DomainRoot)
+    anchor: str = ""             # session 驱动必填（游标回写目标）
+    items: list[PlanItem] = field(default_factory=list)
+    expected_turns: list[int] = field(default_factory=list)
+    status: str = "draft"        # draft | approved | confirmed
+    created_at: str = ""
+
+    def to_dict(self) -> dict:
+        """转 dict（与 from_dict 对称）。"""
         return {
-            "type": self.type.value,
-            "scope": self.scope.value,
-            "title": self.title,
-            "summary": self.summary,
-            "body": self.body,
-            "suggested_parents": list(self.suggested_parents),
-            "suggested_links": list(self.suggested_links),
-            "sources": [s.to_dict() for s in self.sources],
-            "decision": self.decision.value,
-            "edit_id": self.edit_id,
+            "plan_id": self.plan_id,
+            "driver": self.driver.value,
+            "mode": self.mode.value,
+            "domain_root": self.domain_root.to_dict(),
+            "anchor": self.anchor,
+            "items": [i.to_dict() for i in self.items],
+            "expected_turns": list(self.expected_turns),
+            "status": self.status,
+            "created_at": self.created_at,
         }
 
     @classmethod
-    def from_dict(cls, d: dict) -> DistillCandidate:
+    def from_dict(cls, d: dict) -> DistillPlan:
         """从 dict 还原（与 to_dict 对称）。"""
         return cls(
-            type=KnowledgeType(d["type"]),
-            scope=Scope(d["scope"]),
-            title=d["title"],
-            summary=d.get("summary", ""),
-            body=d.get("body", ""),
-            suggested_parents=list(d.get("suggested_parents") or []),
-            suggested_links=list(d.get("suggested_links") or []),
-            sources=[Source.from_dict(s) for s in (d.get("sources") or [])],
-            decision=Decision(d.get("decision", Decision.KEEP.value)),
-            edit_id=d.get("edit_id", ""),
-        )
+            plan_id=d.get("plan_id", ""),
+            driver=DistillDriver(d.get("driver", DistillDriver.SESSION.value)),
+            mode=DistillMode(d.get("mode", DistillMode.DOMAIN.value)),
+            domain_root=DomainRoot.from_dict(d.get("domain_root") or {}),
+            anchor=d.get("anchor", ""),
+            items=[PlanItem.from_dict(i) for i in (d.get("items") or [])],
+            expected_turns=[int(t) for t in (d.get("expected_turns") or [])],
+            status=d.get("status", "draft"),
+            created_at=d.get("created_at", ""))
 
 
 # ==================== 索引记录 / 检索候选 ====================
@@ -276,6 +413,7 @@ class NodeRecord:
     status: str = "draft"    # draft | evolving | settled | deprecated
     created: str = ""
     updated: str = ""
+    aspect: str = ""         # 领域切面（Knowledge.aspect 的索引投影）
 
 
 @dataclass

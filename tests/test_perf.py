@@ -13,10 +13,12 @@ import pytest
 
 from micro_mem.composition import assemble
 from micro_mem.domain.models import (
-    Decision,
-    DistillCandidate,
+    DistillPlan,
+    DomainRoot,
     Knowledge,
     KnowledgeType,
+    PlanAction,
+    PlanItem,
     Scope,
 )
 
@@ -118,12 +120,34 @@ def test_p9_import_history(perf_env):
 
 
 def test_p10_confirm_distill(perf_env):
+    """蒸馏落库编排：submit（校验+回填）→ 填正文 → confirm（10 项计划）。"""
+    with tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False,
+                                     encoding="utf-8") as f:
+        f.write(json.dumps({"message": {"role": "user", "content": "p10"}},
+                           ensure_ascii=False))
+        path = f.name
+    anchor_id = perf_env.distill.anchor(path)
+    root = perf_env.knowledge.create(Knowledge(
+        type=KnowledgeType.MODEL, scope=Scope.DOMAIN, title="p10领域根"))
+
     def _confirm():
-        cands = [DistillCandidate(type=KnowledgeType.METHOD, scope=Scope.DOMAIN,
-                                  title=f"候选{i}", summary="s",
-                                  decision=Decision.KEEP) for i in range(10)]
-        perf_env.distill.confirm(cands)
-    _perf(_confirm, 10, 500)
+        items = [PlanItem(action=PlanAction.CREATE, gist=f"候选{i}",
+                          title=f"候选{i}", aspect="flow", parent=root,
+                          source_anchor=anchor_id, source_turns=[1])
+                 for i in range(10)]
+        plan, _ = perf_env.distill.submit_plan(DistillPlan(
+            anchor=anchor_id, domain_root=DomainRoot(action="existing", id=root),
+            items=items))
+        plan = perf_env.truth.get_plan(plan.plan_id)
+        for it in plan.items:                      # 模拟 R3 填正文
+            it.summary, it.body = "s", "b"
+        perf_env.truth.save_plan(plan)
+        # 重名 title 属预期（重复性能测量），force 放行警告
+        perf_env.distill.confirm_plan(plan.plan_id, force=True)
+    try:
+        _perf(_confirm, 10, 800)   # 计划契约流程含档案落盘×3+全规则校验×2，阈值上调
+    finally:
+        os.unlink(path)
 
 
 def test_p11_graph(perf_env):

@@ -9,8 +9,9 @@
     mem rebuild                                从真值全量重建索引
     mem import --dir <目录> [--mode]           存量导入历史会话 → 锚点
     mem anchor [jsonl] [标题]                  会话 jsonl → 保真锚点（缺省取最新会话）
-    mem distill [anchor_id]                    增量蒸馏准备（缺省取最新锚点）
-    mem confirm <candidates.json>              候选落库（MAIN 两段式 + 游标回写）
+    mem distill [anchor_id] [--domain X]       增量蒸馏准备 / 主题驱动领域盘点
+    mem plan <plan.json>                       提交蒸馏计划（校验 + 归档 data/plans/）
+    mem confirm <plan_id> [--force]            计划落库（硬校验 + $ROOT 两段式 + 游标回写）
     mem serve [--port 8000]                    可视化 HTTP 服务
 
 本层只做参数解析与打印；全部业务编排走 application 服务。
@@ -21,8 +22,9 @@ import json
 import os
 import sys
 
+from ..application.plan_checker import PlanRejectedError
 from ..composition import Components, assemble
-from ..domain.models import DistillCandidate, Knowledge, KnowledgeType, Scope, Source, SourceType
+from ..domain.models import DistillPlan, Knowledge, KnowledgeType, Scope, Source, SourceType
 
 # Windows 下强制 UTF-8 输出，避免管道/控制台中文乱码
 if hasattr(sys.stdout, "reconfigure"):
@@ -52,12 +54,13 @@ def cmd_get(args, ctx: Components) -> None:
     if k is None:
         print(f"未找到: {args.id}")
         return
-    print(f"id: {k.id}   type: {k.type.value}   scope: {k.scope.value}   status: {k.status.value}")
+    print(f"id: {k.id}   type: {k.type.value}   scope: {k.scope.value}   "
+          f"status: {k.status.value}   aspect: {k.aspect or '-'}")
     print(f"title: {k.title}")
     print(f"summary: {k.summary}")
     print(f"parents: {k.parents}   links: {k.links}")
     print(f"external_refs: {[(r.type.value, r.value) for r in k.external_refs]}")
-    print(f"sources: {[(s.type.value, s.ref) for s in k.sources]}")
+    print(f"sources: {[(s.type.value, s.ref, s.turns or None) for s in k.sources]}")
     print(f"body: {(k.body or '')[:300]}")
 
 
@@ -78,6 +81,7 @@ def cmd_create(args, ctx: Components) -> None:
     kid = ctx.knowledge.create(Knowledge(
         type=KnowledgeType(args.type), scope=Scope(args.scope),
         title=args.title, summary=args.summary or "", body=args.body or "",
+        aspect=args.aspect or "",
         sources=[Source(SourceType.USER_DECLARED)]))
     print(f"已收录: {kid} → {ctx.truth.knowledge_ref(kid)}")
 
@@ -116,7 +120,7 @@ def cmd_import(args, ctx: Components) -> None:
             print(f"  {e}")
 
 
-# ================= 蒸馏三段（编排归 DistillService，此处只打印） =================
+# ================= 蒸馏（编排归 DistillService，此处只打印） =================
 
 def _find_newest_session() -> str:
     """取 ~/.claude/projects 下最新修改的 jsonl 会话文件。"""
@@ -150,7 +154,13 @@ def cmd_anchor(args, ctx: Components) -> None:
 
 
 def cmd_distill(args, ctx: Components) -> None:
-    """distill：增量蒸馏准备——重同步锚点 → 输出增量轮次 + 整体上下文（供 AI 提炼）。"""
+    """distill：会话驱动 = 增量蒸馏准备；--domain = 主题驱动领域盘点。"""
+    if args.domain:
+        if args.anchor_id:
+            print("--domain 与 anchor_id 互斥：领域盘点用 --domain，会话增量用 anchor_id")
+            raise SystemExit(1)
+        _cmd_distill_domain(args, ctx)
+        return
     anchor_id = args.anchor_id or _latest_anchor(ctx)
     if not anchor_id:
         print("无锚点，请先运行 anchor")
@@ -163,38 +173,132 @@ def cmd_distill(args, ctx: Components) -> None:
     first_delta = dctx.delta_turns[0][0] if dctx.delta_turns else dctx.distilled_until
     print(f"锚点: {anchor_id} | 已蒸馏到 turn {dctx.distilled_until} | "
           f"本轮增量 turn {first_delta}..{dctx.processed_until}")
-    if ctx.distill.state_path:
-        print(f"状态文件: {ctx.distill.state_path}")
     print("=" * 70)
-    print(f"【增量轮次】（据此提炼候选；sources.ref 填 {anchor_id}）:")
-    for i, t in dctx.delta_turns:
+    if dctx.view_compressed:
+        print("【增量轮次·压缩视图】（超预算触发压缩：tool_result 剥离、长文截断；"
+              "定位据此，原文下钻见文末锚点文件）:")
+    else:
+        print("【增量轮次】（全量原文；source.anchor 填 "
+              f"{anchor_id}）:")
+    for i, t in dctx.view_turns:
         print(f"── turn {i} ──\n{t}")
     print("=" * 70)
-    print("【整体锚点上下文】（供整体视角，勿重复提炼已蒸馏部分，前 8000 字符）：")
-    print(dctx.full_text[:8000])
+    print("【相关已有子树（预检索）】（计划项 parent/edit_id 坐标的参照系）:")
+    if dctx.related:
+        for k in dctx.related:
+            aspect = f" ({k.aspect})" if k.aspect else ""
+            parent = k.parents[0] if k.parents else "-"
+            print(f"[{k.id}] {k.title}{aspect} — {k.summary}   parent: {parent}")
+    else:
+        print("  （无相关已有节点——大概率是新领域/create）")
+    print("=" * 70)
+    print(f"完整原文见锚点文件 data/anchors/{anchor_id}.md（按 ── turn N ── 定位）；"
+          f"source.anchor 填 {anchor_id}")
+
+
+def _cmd_distill_domain(args, ctx: Components) -> None:
+    """distill --domain：主题驱动盘点报告（树全景 + 相关锚点 + 机械空缺统计）。"""
+    dctx = ctx.distill.prepare_domain(args.domain)
+    if not dctx.root_id:
+        print(f"未定位到领域根: \"{args.domain}\"")
+        for n in dctx.candidates:
+            print(f"  [{n.id}] {n.title}")
+        print("请用 id 或更完整的 title 重试" if dctx.candidates
+              else "（库中无任何领域根）")
+        raise SystemExit(1)
+    counts: dict[str, int] = {}
+    for k in dctx.tree:
+        if k.aspect:
+            counts[k.aspect] = counts.get(k.aspect, 0) + 1
+    axis_info = " / ".join(f"{a} {n}" for a, n in counts.items()) or "无切面节点"
+    print(f"领域: {dctx.root_title} ({dctx.root_id}) | "
+          f"树规模 {len(dctx.tree)} 节点（{axis_info}）")
+    print("=" * 70)
+    print("【领域树全景】（按轴分组）:")
+    if dctx.tree:
+        root = dctx.tree[0]
+        print(f"[{root.id}] {root.title} — {root.summary}   （领域根）")
+    grouped: dict[str, list[Knowledge]] = {}
+    for k in dctx.tree[1:]:
+        grouped.setdefault(k.aspect or "(无切面)", []).append(k)
+    for aspect, nodes in grouped.items():
+        print(f"── {aspect} ──")
+        for k in nodes:
+            parent = k.parents[0] if k.parents else "-"
+            print(f"  [{k.id}] {k.title} — {k.summary}   parent: {parent}")
+    print("=" * 70)
+    print("【相关锚点】（盘点素材：粗读锚点对照已有树，缺口判断归 AI）:")
+    if dctx.anchors:
+        for a in dctx.anchors:
+            cursor = "未蒸馏" if a.distilled_until < 0 else f"游标 {a.distilled_until}"
+            print(f"  [{a.id}] {a.title}（{a.date}，{cursor}）")
+    else:
+        print("  （无相关锚点——该领域可能尚无历史会话锚定）")
+    print("=" * 70)
+    print("【空缺提示】（机械统计）:")
+    if dctx.gaps:
+        for g in dctx.gaps:
+            print(f"  - {g}")
+    else:
+        print("  （各轴均有节点，相关锚点均已蒸馏）")
+    print("=" * 70)
+    print(f"下一步：产出 driver=topic 的蒸馏计划（domain_root 填 existing + "
+          f"{dctx.root_id}），mem plan 提交")
+
+
+def _print_rejected(e: PlanRejectedError) -> None:
+    """校验拒收的统一打印：逐条列出 + force 提示。"""
+    print("校验未通过（未落库、未动游标）：")
+    for issue in e.issues:
+        print(f"  {issue.format()}")
+    if e.need_force:
+        print("以上为警告级问题，人工确认无误后加 --force 重试")
+
+
+def cmd_plan(args, ctx: Components) -> None:
+    """plan：提交蒸馏计划（R2 批准动作）——校验 + 回填 expected_turns + 归档。"""
+    try:
+        with open(args.file, encoding="utf-8") as f:
+            plan = DistillPlan.from_dict(json.load(f))
+    except (OSError, json.JSONDecodeError, ValueError, KeyError) as e:
+        print(f"计划文件解析失败: {e}")
+        raise SystemExit(1) from e
+    try:
+        plan, warnings = ctx.distill.submit_plan(plan)
+    except PlanRejectedError as e:
+        _print_rejected(e)
+        raise SystemExit(1) from e
+    except ValueError as e:
+        print(e)
+        raise SystemExit(1) from e
+    print(f"计划已归档: {plan.plan_id} → data/plans/{plan.plan_id}.json")
+    print(f"状态: approved | 增量轮次全集: {plan.expected_turns}")
+    for w in warnings:
+        print(f"  {w.format()}")
+    print(f"下一步：逐项填充 title/summary/body（只回读各项 source.turns 标注的轮次），"
+          f"然后运行 mem confirm {plan.plan_id}")
 
 
 def cmd_confirm(args, ctx: Components) -> None:
-    """confirm：候选落库（幂等 + 溯源校验 + MAIN 两段式 + 游标回写 + 自动挂靠）。"""
-    with open(args.candidates, encoding="utf-8") as f:
-        raw = json.load(f)
-    if not raw:
-        print("candidates 为空")
-        return
-    candidates = [DistillCandidate.from_dict(r) for r in raw]
+    """confirm：计划落库（硬校验 + $ROOT 两段式 + 轮次级溯源 + 游标回写 + 计划回写）。"""
     try:
-        result = ctx.distill.confirm(candidates)
-    except (ValueError, KeyError) as e:
-        print(f"落库失败（未回写蒸馏游标）: {e}")
+        result = ctx.distill.confirm_plan(args.plan_id, force=args.force)
+    except PlanRejectedError as e:
+        _print_rejected(e)
         raise SystemExit(1) from e
-    print(f"落库 {len(result.created_ids)} 条: {result.created_ids}")
+    except (KeyError, ValueError) as e:
+        print(e)
+        raise SystemExit(1) from e
+    print(f"计划 {result.plan_id} 落库完成："
+          f"新建 {len(result.created_ids)} 条 {result.created_ids}，"
+          f"更新 {len(result.edited_ids)} 条 {result.edited_ids}，"
+          f"跳过 {result.skipped} 条")
     if result.cursor_updated:
         cursor = ctx.truth.get_distill_cursor(result.cursor_updated)
         print(f"已更新锚点蒸馏游标: {result.cursor_updated}.distilled_until = {cursor}")
-    if result.attached:
-        print(f"自动挂靠: {result.attached}")
-    else:
-        print("自动挂靠: 无匹配主题")
+    for w in result.warnings:
+        print(f"  已放行警告: {w}")
+    print(f"计划已回写落库结果并归档（status=confirmed）: data/plans/{result.plan_id}.json")
 
 
 # ================= 可视化服务 =================
@@ -237,6 +341,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--title", required=True, help="标题")
     p.add_argument("--summary", default="", help="判断用摘要")
     p.add_argument("--body", default="", help="正文")
+    p.add_argument("--aspect", default="",
+                   help="领域切面：flow|structure|boundary|constraint|…（可扩展，可空）")
     p.set_defaults(func=cmd_create)
 
     p = sub.add_parser("deprecate", help="废弃知识（留痕不删）")
@@ -265,12 +371,19 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("title", nargs="?", default="", help="锚点标题（缺省用文件名）")
     p.set_defaults(func=cmd_anchor)
 
-    p = sub.add_parser("distill", help="增量蒸馏准备")
+    p = sub.add_parser("distill", help="增量蒸馏准备 / --domain 领域盘点")
     p.add_argument("anchor_id", nargs="?", default="", help="锚点 id（缺省取最新锚点）")
+    p.add_argument("--domain", default="",
+                   help="主题驱动：领域根 title 或 id，输出盘点报告（与 anchor_id 互斥）")
     p.set_defaults(func=cmd_distill)
 
-    p = sub.add_parser("confirm", help="蒸馏候选落库")
-    p.add_argument("candidates", help="候选 JSON 文件路径")
+    p = sub.add_parser("plan", help="提交蒸馏计划（校验 + 归档）")
+    p.add_argument("file", help="计划 JSON 文件路径（AI 手写的 draft）")
+    p.set_defaults(func=cmd_plan)
+
+    p = sub.add_parser("confirm", help="蒸馏计划落库")
+    p.add_argument("plan_id", help="已归档的计划 id（plan-<yyyymmdd>-<seq>）")
+    p.add_argument("--force", action="store_true", help="警告级问题人工确认后放行")
     p.set_defaults(func=cmd_confirm)
 
     p = sub.add_parser("serve", help="可视化 HTTP 服务")

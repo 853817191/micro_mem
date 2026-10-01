@@ -7,7 +7,17 @@ from datetime import datetime
 
 from micro_mem.application.ports import Embedder, IndexStore, TruthStore
 from micro_mem.composition import assemble_inmemory
-from micro_mem.domain.models import Anchor, Knowledge, KnowledgeType, NodeRecord, Scope
+from micro_mem.domain.models import (
+    Anchor,
+    DistillPlan,
+    DomainRoot,
+    Knowledge,
+    KnowledgeType,
+    NodeRecord,
+    PlanAction,
+    PlanItem,
+    Scope,
+)
 
 # ---------------- 工厂 ----------------
 
@@ -86,6 +96,39 @@ def test_truth_anchor_exists_accepts_both_ref_forms():
     assert c.truth.anchor_exists(aid), "纯 id 形态"
     assert c.truth.anchor_exists(f"anchors/{aid}.md"), "引用路径形态"
     assert not c.truth.anchor_exists("anchors/s-20990101-999.md")
+
+
+def test_truth_search_anchors_substring():
+    """锚点检索（主题驱动供给）：title/正文子串匹配，limit 截断，空查询返回空。"""
+    c = assemble_inmemory()
+    a1 = c.truth.save_anchor(Anchor(id="", title="国际机票联调", date="",
+                                    content="需求单流程讨论"))
+    a2 = c.truth.save_anchor(Anchor(id="", title="其他会话", date="",
+                                    content="正文里提到机票"))
+    c.truth.save_anchor(Anchor(id="", title="无关", date="", content="完全无关"))
+    assert [a.id for a in c.truth.search_anchors("国际机票")] == [a1]   # title 命中
+    assert [a.id for a in c.truth.search_anchors("需求单")] == [a1]     # 正文命中
+    assert [a.id for a in c.truth.search_anchors("机票")] == [a1, a2]   # 两锚点，按 id 序
+    assert c.truth.search_anchors("不存在的词") == []
+    assert c.truth.search_anchors("") == []
+    assert len(c.truth.search_anchors("机票", limit=1)) == 1            # limit 截断
+
+
+def test_truth_plan_roundtrip_and_copy_isolated():
+    """计划档案契约：id 分配、存取往返、返回值副本隔离（与知识用例同款红线）。"""
+    c = assemble_inmemory()
+    plan = DistillPlan(
+        anchor="s-1", domain_root=DomainRoot(action="existing", id="k-0001"),
+        items=[PlanItem(action=PlanAction.CREATE, gist="g", title="t")])
+    pid = c.truth.save_plan(plan)
+    today = datetime.now().strftime("%Y%m%d")
+    assert pid == f"plan-{today}-001"
+    got = c.truth.get_plan(pid)
+    assert got.anchor == "s-1" and got.items[0].action is PlanAction.CREATE
+    got.items.append(PlanItem(action=PlanAction.SKIP, gist="污染"))
+    assert len(c.truth.get_plan(pid).items) == 1, "返回值必须是副本，改它不污染库"
+    assert [p.plan_id for p in c.truth.list_plans()] == [pid]
+    assert c.truth.get_plan("plan-20990101-999") is None
 
 
 # ---------------- IndexStore ----------------

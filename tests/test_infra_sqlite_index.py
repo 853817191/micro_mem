@@ -32,6 +32,28 @@ def test_reopen_existing_db_is_idempotent(tmp_path):
     assert node is not None and node.title == "持久化"
 
 
+def test_existing_db_migrates_aspect_column(tmp_path):
+    """既有库轻量迁移：无 aspect 列的旧库打开后自动补列，存量数据无损、投影可读。"""
+    db = str(tmp_path / "old.db")
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "CREATE TABLE nodes (id TEXT PRIMARY KEY, file TEXT NOT NULL, "
+        "title TEXT NOT NULL, summary TEXT, type TEXT, scope TEXT, "
+        "status TEXT DEFAULT 'draft', created TEXT, updated TEXT)")
+    conn.execute("INSERT INTO nodes(id, file, title, summary, type, scope) "
+                 "VALUES('k-0001', 'f.md', '旧节点', '摘', 'fact', 'domain')")
+    conn.commit()
+    conn.close()
+    store = SqliteIndexStore(db)   # 打开即触发 _ensure_schema 迁移
+    cols = {r["name"] for r in store._conn.execute("PRAGMA table_info(nodes)")}
+    assert "aspect" in cols
+    node = store.get_node("k-0001")
+    assert node is not None and node.title == "旧节点" and node.aspect == ""
+    # 迁移后 upsert 新字段正常
+    store.upsert_node(mk_node("k-0002", "新节点", aspect="flow"), body="正文")
+    assert store.get_node("k-0002").aspect == "flow"
+
+
 def test_db_parent_dir_auto_created(tmp_path):
     """db 路径的父目录不存在时自动创建。"""
     db = str(tmp_path / "a" / "b" / "memory.db")
