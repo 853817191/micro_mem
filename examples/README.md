@@ -34,29 +34,28 @@ examples/
 ## 用法
 
 ```bash
-# 前置：先建目录与库
-python build_db.py
-
 # 把示例数据放进真实数据目录
 cp examples/knowledge/*.md data/knowledge/
 cp examples/anchors/*.md   data/anchors/
 
-# 从 md 真值重建索引
-python src/main.py rebuild          # → rebuild 完成：5 条知识重建
+# 从 md 真值重建索引（首次运行自动建目录 + 建库）
+mem rebuild                     # → rebuild 完成：5 条知识重建
 
 # 试检索（多关键词融合）
-python src/main.py search "发酵 温度" --multi
+mem search "发酵 温度" --multi
 
 # 看图
-python src/server.py                # → http://localhost:8000/
+mem serve                       # → http://localhost:8000/
 ```
+
+（未 `pip install` 时用 `clients/cli/mem.cmd|sh` 或 `PYTHONPATH=src python -m micro_mem`。）
 
 ## 清空示例数据
 
 `data/` 完全属于你自己，删掉即可重新开始：
 
 ```bash
-rm -rf data && python build_db.py
+rm -rf data && mem rebuild
 ```
 
 ## 为什么目录叫 `examples/` 而不是 `data/`

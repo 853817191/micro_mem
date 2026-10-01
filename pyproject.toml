@@ -20,14 +20,16 @@ dev = [
 ]
 
 [project.scripts]
-mem = "micro_mem.cli.main:main"
-mem-server = "micro_mem.cli.server:main"
-mem-build-db = "micro_mem.cli.build_db:build"
-mem-import-one = "micro_mem.cli.import_one:main"
-mem-distill = "micro_mem.cli.distill:main"
+# D4：单 mem 命令树（search/get/create/deprecate/delete/traverse/rebuild/
+# import/anchor/distill/confirm/serve 全在这一个入口下）
+mem = "micro_mem.interfaces.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+# schema.sql / web 静态资源入包：pip install 后 importlib.resources 可读
+micro_mem = ["infrastructure/schema.sql", "interfaces/web/*", "interfaces/web/vendor/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

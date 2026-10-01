@@ -16,26 +16,20 @@
 
 ## 二、cli/：命令包装器（人用的入口）
 
-`cli/mem.cmd`（Windows）和 `cli/mem.sh`（macOS / Linux）是两个**薄薄的转发脚本**：
+`cli/mem.cmd`（Windows）和 `cli/mem.sh`（macOS / Linux）是**一行转发脚本**：
 
 ```text
-mem search "关键词"
-  └──> 执行 python <仓库根>/src/micro_mem/cli/main.py search "关键词"
-
-mem anchor <jsonl>
-  └──> 执行 python <仓库根>/src/micro_mem/cli/distill.py anchor <jsonl>
+mem <任何子命令>
+  └──> 执行 PYTHONPATH=<仓库根>/src python -m micro_mem <任何子命令>
 ```
 
-转发规则只有一条：
+所有子命令（`search` / `get` / `create` / `deprecate` / `delete` / `traverse` / `rebuild` /
+`import` / `anchor` / `distill` / `confirm` / `serve`）都在同一个 `mem` 入口下，不再有转发分支。
 
-- `mem anchor` / `distill` / `confirm` → 转发给 `src/micro_mem/cli/distill.py`
-- 其余（`search` / `get` / `rebuild` / `create` / `import` / `traverse`）→ 转发给 `src/micro_mem/cli/main.py`
+为什么要有这层包装器，而不是直接敲 `python -m micro_mem`：
 
-为什么要有这层包装器，而不是直接敲 `python src/micro_mem/cli/main.py`：
-
-1. **统一命令前缀**：所有操作都是 `mem xxx`，不用记每个脚本在哪。
+1. **不用装包**：设好 `PYTHONPATH` 就跑，不依赖 `pip install`；多人共享一个仓库时尤其方便。
 2. **自动推导仓库根**：脚本按自身位置找仓库根（`clients/cli/../..`），仓库放哪都行；需要换位置用 `MEMORY_HOME` 环境变量覆盖。
-3. **绕开 Windows 路径坑**：手拼 `python ...\...\main.py` 时，反斜杠在 Bash 下会被转义吞掉；包装器替你拼好。
 
 ## 三、skill/：Claude Code skill（AI 用的入口）
 
@@ -54,8 +48,8 @@ mem anchor <jsonl>
 ```bash
 pip install -e .
 mem search "关键词"      # 直接可用（这是 pip 装的入口点，不再是 clients/cli/mem.cmd）
-mem-build-db             # 建库
-mem-server               # 起可视化服务
+mem rebuild              # 首次运行自动建库（幂等）
+mem serve                # 起可视化服务
 ```
 
 两条路的区别：
@@ -65,4 +59,4 @@ mem-server               # 起可视化服务
 | `clients/cli/mem.cmd` | 否 | 只想用、不想 `pip install`；或多人共享一个仓库 |
 | pip 入口点 `mem` | 是（`pip install -e .`） | 正式部署、CI、脚本集成 |
 
-它们最终都调到 `src/micro_mem/cli/` 下同一套 py，**功能完全一致**，只是「怎么敲命令」不同。
+它们最终都调到同一个入口 `micro_mem.interfaces.cli:main`，**功能完全一致**，只是「怎么敲命令」不同。

@@ -29,8 +29,8 @@ jobs:
           ruff check src tests
           mypy src
 
-      - name: 建库（校验 schema.sql 与 FTS5 trigram 分词器可用）
-        run: mem-build-db
+      - name: 建库（空库重建：校验 schema.sql 与 FTS5 trigram 分词器可用）
+        run: mem rebuild
 
       - name: 加载示例数据并重建索引
         run: |

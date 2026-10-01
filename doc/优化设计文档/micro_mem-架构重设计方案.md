@@ -452,16 +452,22 @@ e2e             → composition 装配后跑冒烟
 
 **真值兼容是红线**：frontmatter 格式一个字节不变——现有全部知识与锚点必须无损。验收方式：新架构对真实 data/ 执行 rebuild，与旧索引逐节点比对一致。
 
-| 阶段 | 内容 | 验收门禁 |
-|---|---|---|
-| **0 止血** | 仓库卫生（git rm --cached candidates.json/.playwright-mcp + gitignore 补全 + filter-repo 清历史）；B2 旧结构热修（FTS upsert）；CI 加 ruff/mypy 门 | 旧测试全绿 + ruff/mypy 过 |
-| **1 骨架** | domain/models（dataclass 化）+ application/ports + composition 骨架 + InMemory 端口实现 | 新代码 mypy 过；旧代码不动 |
-| **2 基础设施** | markdown_truth / sqlite_index / claude_jsonl / config 重写，各带集成测试 | tmp_path 集成测试全绿 |
-| **3 应用服务** | 五个 service + 内存端口单测 | 服务层单测全绿 |
-| **4 入口切换** | cli.py 单命令树 + http 工厂化 + 包装器变薄 + 旧入口点删除 | e2e：建库→载示例→检索→蒸馏全链路 |
-| **5 拆除与文档** | 删旧 api/store/common/cli 及过时测试；真实 data/ 兼容性验收；README 重写（开源向）；doc 更新 | 全部测试绿 + 真实数据无损 |
+| 阶段 | 内容 | 验收门禁 | 状态 |
+|---|---|---|---|
+| **0 止血** | 仓库卫生（git rm --cached candidates.json/.playwright-mcp + gitignore 补全 + filter-repo 清历史）；B2 旧结构热修（FTS upsert）；CI 加 ruff/mypy 门 | 旧测试全绿 + ruff/mypy 过 | ✅ 完成（bfddf52） |
+| **1 骨架** | domain/models（dataclass 化）+ application/ports + composition 骨架 + InMemory 端口实现 | 新代码 mypy 过；旧代码不动 | ✅ 完成 |
+| **2 基础设施** | markdown_truth / sqlite_index / claude_jsonl / config 重写，各带集成测试 | tmp_path 集成测试全绿 | ✅ 完成 |
+| **3 应用服务** | 五个 service + 内存端口单测 | 服务层单测全绿 | ✅ 完成 |
+| **4 入口切换** | cli.py 单命令树 + http 工厂化 + 包装器变薄 + 旧入口点删除 | e2e：建库→载示例→检索→蒸馏全链路 | ✅ 完成（e2e 全链路人工跑通） |
+| **5 拆除与文档** | 删旧 api/store/common/cli 及过时测试；真实 data/ 兼容性验收；README 重写（开源向）；doc 更新 | 全部测试绿 + 真实数据无损 | ✅ 完成（验收见下） |
 
 每阶段独立验收，测试全绿才进下一阶段。阶段 0 先做，避免重构期间继续制造垃圾。
+
+**阶段 5 真实数据验收结论**（2026-09-30，35 条知识 / 4 锚点）：
+新栈 rebuild 与旧索引逐节点对比——title/summary/type/scope/status **零差异**；
+仅两处差异且方向均为改进：① created/updated 忠实读 frontmatter 原值
+（旧栈 rebuild 曾把时间戳统一刷成重建时刻，属旧栈缺陷）；② 旧索引漏收的 k-0015
+（真值 md 在而旧索引无）被正确收编。rebuild 前后真值 35 个 md 文件 md5 全量一致。
 
 ---
 

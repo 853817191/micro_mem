@@ -1,33 +1,38 @@
-"""SQLite 实现（默认引擎）：五张表读写、FTS 更新、rowid 对齐、递归 CTE 图遍历。
+"""IndexStore 的 SQLite 实现（默认引擎）：五张表读写、FTS 更新、递归 CTE 图遍历。
 
 一致性约定：
-- nodes 与 nodes_fts 用同一个 rowid 对齐（create 时取 lastrowid 回填）
-- FTS 索引更新用原生 UPDATE，无行时补 INSERT（避免 DELETE+INSERT 在 trigram 下残留旧词）
+- nodes 与 nodes_fts 用同一个 rowid 对齐（rowid 是实现内部细节，不出端口）
+- upsert 全量语义：nodes 行 ON CONFLICT 覆盖；FTS 原生 UPDATE（无行补 INSERT，
+  避免 DELETE+INSERT 在 trigram 下残留旧词）
+- FTS 表的 body 列是纯索引耗材（检索/LIKE 兜底用），不提供读出口（D3：
+  body 全文由 TruthStore 出）
 - 所有写操作在事务内原子完成
 """
 import json
 import os
 import sqlite3
+from importlib.resources import files
 
-from .base import NetworkStore, NodeRecord
-
-# 项目根目录（schema.sql 所在处）：src/micro_mem/store/sqlite_store.py → 上溯四级
-ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-SCHEMA_PATH = os.path.join(ROOT, "schema.sql")
+from ..application.ports import IndexStore
+from ..domain.models import NodeRecord
 
 # 三类边类型常量
 EDGE_TYPES = ("parent", "link", "trace")
-REF_TYPES = ("idev", "mr", "uat", "url")
 
 # 语义检索距离过滤系数：排除 distance > 最近距离 * DIST_RATIO 的近邻（语义不相关）
 DIST_RATIO = 1.15
 
 
-class SqliteNetworkStore(NetworkStore):
-    """SQLite 实现（默认引擎）。"""
+def _load_schema() -> str:
+    """从包内资源读 schema.sql（pip install 后也可用，不自损）。"""
+    return files("micro_mem.infrastructure").joinpath("schema.sql").read_text(encoding="utf-8")
+
+
+class SqliteIndexStore(IndexStore):
+    """IndexStore 的 SQLite 实现。"""
 
     def __init__(self, db_path: str, vec_dim: int = 1024):
-        """连接数据库；首次连接自动执行 schema.sql 建表（幂等）；向量表按 vec_dim 建。"""
+        """连接数据库；首次连接自动执行包内 schema.sql 建表（幂等）。"""
         self.db_path = db_path
         self._vec_dim = vec_dim
         self._vec_available = False
@@ -37,7 +42,7 @@ class SqliteNetworkStore(NetworkStore):
     # ---------------- 连接与建表 ----------------
 
     def _connect(self) -> sqlite3.Connection:
-        """建立连接：确保父目录存在，用 Row 工厂；尝试加载 sqlite-vec 扩展（向量检索）。"""
+        """建立连接：确保父目录存在，用 Row 工厂；尝试加载 sqlite-vec 扩展。"""
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
@@ -55,99 +60,67 @@ class SqliteNetworkStore(NetworkStore):
             return False
 
     def _ensure_schema(self) -> None:
-        """首次连接执行 schema.sql（IF NOT EXISTS，幂等可重复）；向量可用时建 nodes_vec。"""
-        with open(SCHEMA_PATH, encoding="utf-8") as f:
-            self._conn.executescript(f.read())
+        """首次连接执行包内 schema.sql（IF NOT EXISTS，幂等）；向量可用时建 nodes_vec。"""
+        self._conn.executescript(_load_schema())
         if self._vec_available:
             self._conn.execute(
                 f"CREATE VIRTUAL TABLE IF NOT EXISTS nodes_vec "
                 f"USING vec0(embedding float[{self._vec_dim}])")
         self._conn.commit()
 
-    # ---------------- 构建 / 维护 ----------------
+    # ---------------- 节点 ----------------
 
-    def create_node(self, node: NodeRecord, body: str = "") -> None:
-        """新增节点；body 非空则同步 FTS 索引（独立表存内容+倒排）。"""
-        cur = self._conn.execute(
-            "INSERT INTO nodes(id, file, title, summary, type, scope, status, created, updated) "
-            "VALUES(?,?,?,?,?,?,?,?,?)",
-            (node.id, node.file, node.title, node.summary,
-             node.type, node.scope, node.status, node.created, node.updated))
-        rowid = cur.lastrowid
-        if body:
-            assert rowid is not None
-            self._fts_insert(rowid, node.title, body)
-        self._conn.commit()
+    def upsert_node(self, node: NodeRecord, body: str = "") -> None:
+        """全量覆盖（端口契约）：nodes 行 INSERT/覆盖合一；FTS 无条件同步。
 
-    def update_node(self, node: NodeRecord, new_body: str = "") -> None:
-        """更新节点；title/body 变化时同步 FTS（原生 UPDATE，无行时补 INSERT）。"""
-        old = self.get_node(node.id)
-        if old is None:
-            raise KeyError(f"节点不存在: {node.id}")
-
-        old_title = old.title
-        old_rowid = old.rowid
-        assert old_rowid is not None
-        old_body = self._get_fts_body(old_rowid)
-        new_body = new_body or old_body     # 未传新 body = body 不变
-
+        FTS 用原生 UPDATE（自动维护倒排，避免 DELETE+INSERT 在 trigram 下残留旧词），
+        无行时补 INSERT（如首次 body 为空后补写——B2 修复的语义并入 upsert）。
+        """
         with self._conn:
-            # 更新 nodes 元数据
             self._conn.execute(
-                "UPDATE nodes SET file=?, title=?, summary=?, type=?, scope=?, status=?, updated=? "
-                "WHERE id=?",
-                (node.file, node.title, node.summary, node.type,
-                 node.scope, node.status, node.updated, node.id))
-            # 标题或正文变化 → 重建 FTS 索引
-            # 用 FTS5 原生 UPDATE（自动维护倒排），避免 DELETE+INSERT 在 trigram 下残留旧词；
-            # 若节点创建时 body 为空（无 FTS 行），UPDATE 命中 0 行，需补 INSERT，
-            # 否则补写的 body 永远进不了索引，且重写 md 时读回空 body 会丢真值（B2）
-            if old_title != node.title or old_body != new_body:
-                cur = self._conn.execute(
-                    "UPDATE nodes_fts SET title=?, body=? WHERE rowid=?",
-                    (node.title, new_body, old_rowid))
-                if cur.rowcount == 0:
-                    self._fts_insert(old_rowid, node.title, new_body)
+                "INSERT INTO nodes(id, file, title, summary, type, scope, status, "
+                "created, updated) VALUES(?,?,?,?,?,?,?,?,?) "
+                "ON CONFLICT(id) DO UPDATE SET file=excluded.file, "
+                "title=excluded.title, summary=excluded.summary, type=excluded.type, "
+                "scope=excluded.scope, status=excluded.status, "
+                "created=excluded.created, updated=excluded.updated",
+                (node.id, node.file, node.title, node.summary, node.type,
+                 node.scope, node.status, node.created, node.updated))
+            rowid = self._rowid_of(node.id)
+            assert rowid is not None  # 刚 upsert 写入，必然存在
+            cur = self._conn.execute(
+                "UPDATE nodes_fts SET title=?, body=? WHERE rowid=?",
+                (node.title, body, rowid))
+            if cur.rowcount == 0:
+                self._fts_insert(rowid, node.title, body)
 
     def delete_node(self, id: str) -> None:
-        """删除节点：连带删除 FTS / edges / external_refs / 向量（保持一致性）。"""
-        rec = self.get_node(id)
-        if rec is None:
+        """删除节点：连带 FTS / edges / external_refs / 向量（保持一致性）。"""
+        rowid = self._rowid_of(id)
+        if rowid is None:
             return
         with self._conn:
             self._conn.execute("DELETE FROM edges WHERE from_id=? OR to_id=?", (id, id))
             self._conn.execute("DELETE FROM external_refs WHERE node_id=?", (id,))
-            self._conn.execute("DELETE FROM nodes_fts WHERE rowid=?", (rec.rowid,))
+            self._conn.execute("DELETE FROM nodes_fts WHERE rowid=?", (rowid,))
             if self._vec_available:
-                self._conn.execute("DELETE FROM nodes_vec WHERE rowid=?", (rec.rowid,))
+                self._conn.execute("DELETE FROM nodes_vec WHERE rowid=?", (rowid,))
             self._conn.execute("DELETE FROM nodes WHERE id=?", (id,))
 
     def get_node(self, id: str) -> NodeRecord | None:
-        """按 id 取节点（含 rowid）。"""
+        """按 id 取节点（不含 body——body 全文走 TruthStore，D3）。"""
         row = self._conn.execute(
-            "SELECT rowid, * FROM nodes WHERE id=?", (id,)).fetchone()
-        if row is None:
-            return None
-        return self._row_to_node(row)
-
-    def get_fts_body(self, id: str) -> str:
-        """取节点的 FTS 正文（索引副本，读 body 用）。"""
-        rec = self.get_node(id)
-        if rec is None:
-            return ""
-        assert rec.rowid is not None
-        return self._get_fts_body(rec.rowid)
+            "SELECT * FROM nodes WHERE id=?", (id,)).fetchone()
+        return self._row_to_node(row) if row else None
 
     # ---------------- 检索 ----------------
 
     def search_keyword(self, query: str, limit: int = 10,
                        type_filter: str = "", scope_filter: str = "") -> list[NodeRecord]:
-        """关键词检索：FTS5 字面 + LIKE 兜底（覆盖 2 字中文词），合并去重。"""
+        """关键词检索：FTS5 字面 + LIKE 兜底（覆盖 <3 字词），合并去重。"""
         results: dict[str, NodeRecord] = {}
-        # FTS5 路：trigram 子串匹配（3 字以上可靠）
         for n in self._search_fts(query, limit, type_filter, scope_filter):
             results[n.id] = n
-        # LIKE 兜底：title/summary 包含查询词（2 字词）
         if len(results) < limit:
             for n in self._search_like(query, limit, type_filter, scope_filter):
                 results.setdefault(n.id, n)
@@ -159,7 +132,7 @@ class SqliteNetworkStore(NetworkStore):
 
         查询词用双引号包裹为短语，避免 FTS5 特殊字符（@、引号、冒号等）造成语法错误。
         """
-        sql = ("SELECT n.rowid, n.* FROM nodes n "
+        sql = ("SELECT n.* FROM nodes n "
                "JOIN (SELECT rowid, rank FROM nodes_fts "
                "      WHERE nodes_fts MATCH '\"' || ? || '\"') f ON n.rowid = f.rowid")
         params: list = [query]
@@ -176,14 +149,13 @@ class SqliteNetworkStore(NetworkStore):
 
     def _search_like(self, query: str, limit: int, type_filter: str,
                      scope_filter: str) -> list[NodeRecord]:
-        """LIKE 兜底：title/summary/body 包含查询词（覆盖 <3 字中文词）。
+        """LIKE 兜底：title/summary/body 包含查询词（覆盖 <3 字词）。
 
         body 全文只在 FTS 索引副本（nodes_fts）里、nodes 表无 body 列，
-        故 body 单独从 nodes_fts JOIN nodes 查，补齐 2 字正文词的召回。
+        故 body 单独从 nodes_fts JOIN nodes 查，补齐短词正文召回。
         """
         pattern = f"%{query}%"
-        # 1) nodes 表：title / summary（summary 不在 FTS，只能在此查）
-        sql = "SELECT rowid, * FROM nodes WHERE (title LIKE ? OR summary LIKE ?)"
+        sql = "SELECT * FROM nodes WHERE (title LIKE ? OR summary LIKE ?)"
         params: list = [pattern, pattern]
         if type_filter:
             sql += " AND type=?"
@@ -194,9 +166,8 @@ class SqliteNetworkStore(NetworkStore):
         sql += " LIMIT ?"
         params.append(limit)
         rows = self._conn.execute(sql, params).fetchall()
-        # 2) nodes_fts 表：body（补正文里的 2 字词；JOIN nodes 取元数据 + type/scope 过滤）
         if len(rows) < limit:
-            bsql = ("SELECT n.rowid, n.* FROM nodes n "
+            bsql = ("SELECT n.* FROM nodes n "
                     "JOIN nodes_fts f ON f.rowid = n.rowid WHERE f.body LIKE ?")
             bparams: list = [pattern]
             if type_filter:
@@ -240,19 +211,24 @@ class SqliteNetworkStore(NetworkStore):
 
     # ---------------- 向量检索 ----------------
 
-    def save_vector(self, node_id: str, embedding: list) -> None:
-        """存向量到 nodes_vec（按 node_id 定位 rowid 关联 nodes；向量用 JSON 数组）。"""
+    def save_vector(self, node_id: str, embedding: list[float]) -> None:
+        """存向量到 nodes_vec（按 node_id 定位 rowid 关联 nodes；向量用 JSON 数组）。
+
+        先删后插：sqlite-vec 虚拟表不保证 INSERT OR REPLACE 的 rowid 语义
+        （实测 UNIQUE constraint failed），与 FTS5 的处理策略一致。
+        """
         if not self._vec_available:
             return
-        rec = self.get_node(node_id)
-        if rec is None:
+        rowid = self._rowid_of(node_id)
+        if rowid is None:
             return
+        self._conn.execute("DELETE FROM nodes_vec WHERE rowid = ?", (rowid,))
         self._conn.execute(
-            "INSERT OR REPLACE INTO nodes_vec(rowid, embedding) VALUES(?, ?)",
-            (rec.rowid, json.dumps(embedding)))
+            "INSERT INTO nodes_vec(rowid, embedding) VALUES(?, ?)",
+            (rowid, json.dumps(embedding)))
         self._conn.commit()
 
-    def search_semantic(self, query_vec: list, limit: int = 10,
+    def search_semantic(self, query_vec: list[float], limit: int = 10,
                         type_filter: str = "", scope_filter: str = "") -> list[NodeRecord]:
         """语义检索：向量最近邻 → 距离过滤 → JOIN nodes 取数据。
 
@@ -261,22 +237,19 @@ class SqliteNetworkStore(NetworkStore):
         """
         if not self._vec_available:
             return []
-        # 第一步：取最近邻带 distance
         rows = self._conn.execute(
             "SELECT rowid, distance FROM nodes_vec "
             "WHERE embedding MATCH ? AND k = ?",
             (json.dumps(query_vec), limit)).fetchall()
         if not rows:
             return []
-        # 距离过滤：只保留与最近距离接近的候选
         min_d = rows[0]["distance"]
         keep = [r["rowid"] for r in rows
                 if r["distance"] <= min_d * DIST_RATIO + 1e-9]
         if not keep:
             return []
-        # 第二步：按保留的 rowid 取 nodes（可叠加 type/scope 过滤）
         placeholders = ",".join("?" * len(keep))
-        sql = f"SELECT n.rowid, n.* FROM nodes n WHERE n.rowid IN ({placeholders})"
+        sql = f"SELECT n.* FROM nodes n WHERE n.rowid IN ({placeholders})"
         params: list = list(keep)
         if type_filter:
             sql += " AND n.type=?"
@@ -318,8 +291,7 @@ class SqliteNetworkStore(NetworkStore):
 
     def get_all_nodes(self) -> list[NodeRecord]:
         """取全部节点（可视化/统计用）。"""
-        rows = self._conn.execute(
-            "SELECT rowid, * FROM nodes ORDER BY id").fetchall()
+        rows = self._conn.execute("SELECT * FROM nodes ORDER BY id").fetchall()
         return [self._row_to_node(r) for r in rows]
 
     def get_all_edges(self) -> list[tuple[str, str, str]]:
@@ -371,19 +343,19 @@ class SqliteNetworkStore(NetworkStore):
 
     # ---------------- 私有工具方法 ----------------
 
-    def _row_to_node(self, row: sqlite3.Row) -> NodeRecord:
-        """把 nodes 行转成 NodeRecord（含 rowid）。"""
+    def _rowid_of(self, node_id: str) -> int | None:
+        """按业务 id 查物理 rowid（nodes ↔ nodes_fts/nodes_vec 的对齐键，不出端口）。"""
+        row = self._conn.execute(
+            "SELECT rowid FROM nodes WHERE id=?", (node_id,)).fetchone()
+        return row[0] if row else None
+
+    @staticmethod
+    def _row_to_node(row: sqlite3.Row) -> NodeRecord:
+        """把 nodes 行转成 NodeRecord（rowid 不进入领域模型）。"""
         return NodeRecord(
-            rowid=row["rowid"], id=row["id"], file=row["file"],
-            title=row["title"], summary=row["summary"],
+            id=row["id"], file=row["file"], title=row["title"], summary=row["summary"],
             type=row["type"], scope=row["scope"], status=row["status"],
             created=row["created"], updated=row["updated"])
-
-    def _get_fts_body(self, rowid: int) -> str:
-        """从 FTS 表取该 rowid 的旧正文（独立表存了内容副本）。"""
-        row = self._conn.execute(
-            "SELECT body FROM nodes_fts WHERE rowid=?", (rowid,)).fetchone()
-        return row["body"] if row else ""
 
     def _fts_insert(self, rowid: int, title: str, body: str) -> None:
         """FTS5 插入新索引。"""
