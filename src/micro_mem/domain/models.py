@@ -176,13 +176,18 @@ class Knowledge:
 
 @dataclass
 class Anchor:
-    """锚点：对话原文保真存档（正文不可变，游标可推进）。"""
+    """锚点：对话原文保真存档（正文不可变，游标可推进）。
+
+    status：active | deprecated。作废是逻辑标（真值保留、审计链不断），
+    作废锚点不得被蒸馏计划引用（checker 的 anchor_active 拦截）。
+    """
     id: str
     title: str
     date: str
     content: str
-    source: str = ""            # 会话 jsonl 源路径（增量蒸馏定位增量轮次用）
+    source: str = ""            # 素材来源（路径/URL/inline-text），仅溯源不回读
     distilled_until: int = -1   # 蒸馏游标：已蒸馏到的最后轮次号（-1 = 未蒸馏）
+    status: str = "active"      # active | deprecated（D7 只增不删：作废不物理删）
 
     def to_dict(self) -> dict:
         """转 dict（全字段，与 from_dict 对称）。"""
@@ -193,6 +198,7 @@ class Anchor:
             "content": self.content,
             "source": self.source,
             "distilled_until": self.distilled_until,
+            "status": self.status,
         }
 
     @classmethod
@@ -205,6 +211,7 @@ class Anchor:
             content=d.get("content", ""),
             source=d.get("source", ""),
             distilled_until=int(d.get("distilled_until", -1)),
+            status=d.get("status", "active"),
         )
 
 

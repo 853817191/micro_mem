@@ -121,7 +121,7 @@ class DistillService:
         turns = parser.parse_turns(source)
         if not turns:
             return ""
-        return self._save_turns(turns, title or self._default_title(source), source)
+        return self._save_turns(turns, title or self.default_title(source), source)
 
     def anchor_text(self, text: str, title: str = "") -> str:
         """对话中直接给的一段描述（--text 通道）：整段 = 1 turn。
@@ -156,7 +156,8 @@ class DistillService:
             "（支持: .jsonl / .md / .html / http(s):// URL；或 --text 直接输入文本）")
 
     @staticmethod
-    def _default_title(source: str) -> str:
+    def default_title(source: str) -> str:
+        """素材缺省标题：URL 取域名，文件取 basename（--text 由 anchor_text 截前 20 字）。"""
         if source.startswith(("http://", "https://")):
             return source.split("//", 1)[1].split("/")[0]
         return os.path.basename(source)

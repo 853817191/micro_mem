@@ -186,6 +186,7 @@ class MarkdownTruthStore(TruthStore):
             f"title: {a.title}",
             f"date: {a.date}",
             f"distilled_until: {a.distilled_until}",
+            f"status: {a.status or 'active'}",
         ]
         if a.source:
             lines.append(f"source: {a.source}")
@@ -208,7 +209,8 @@ class MarkdownTruthStore(TruthStore):
             date=str(meta.get("date", "")),
             content=content,
             source=meta.get("source", "") or "",
-            distilled_until=self._read_cursor(path))
+            distilled_until=self._read_cursor(path),
+            status=str(meta.get("status", "active")))
 
     def list_anchors(self) -> list[Anchor]:
         """全量锚点（按文件名排序）。"""
@@ -238,6 +240,27 @@ class MarkdownTruthStore(TruthStore):
         if anchor_id.endswith(".md"):
             anchor_id = anchor_id[:-3]
         return os.path.exists(os.path.join(self._anchors_dir, f"{anchor_id}.md"))
+
+    def anchor_active(self, ref: str) -> bool:
+        """存在且未作废（蒸馏计划引用的合法性口径）。"""
+        anchor_id = ref.replace("\\", "/").split("/")[-1]
+        if anchor_id.endswith(".md"):
+            anchor_id = anchor_id[:-3]
+        a = self.get_anchor(anchor_id)
+        return a is not None and a.status != "deprecated"
+
+    def deprecate_anchor(self, id: str) -> bool:
+        """作废锚点：frontmatter status 行定点改写（缺失则插入），正文不动。"""
+        path = os.path.join(self._anchors_dir, f"{id}.md")
+        if not os.path.exists(path):
+            return False
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+        new = re.sub(r"^status:\s*\S+", "status: deprecated", text, flags=re.M)
+        if new == text:
+            new = text.replace("---\n", "---\nstatus: deprecated\n", 1)
+        self._write_text(path, new)
+        return True
 
     def resync_anchor(self, id: str, content: str) -> bool:
         """重同步锚点正文：frontmatter 字节不动，只换正文区。"""

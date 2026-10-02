@@ -222,15 +222,52 @@ def test_anchor_missing_path(comp, capsys):
 
 
 def test_anchor_preview_gate(comp, tmp_path, capsys):
-    """确认闸门：--preview 只渲染素材确认视图，不落库。"""
+    """确认闸门：--preview 只渲染素材确认视图（含将生成标题），不落库。"""
     md = tmp_path / "doc.md"
     md.write_text("# 概述\n甲\n\n## 流程\n乙", encoding="utf-8")
     main(["anchor", str(md), "--preview"], components=comp)
     out = capsys.readouterr().out
     assert "【素材确认】共 2 轮" in out
+    assert "将生成标题: doc.md" in out              # title 进闸门（缺口①）
     assert "── turn 1 ──" in out and "── turn 2 ──" in out
     assert "去掉 --preview" in out
     assert comp.truth.list_anchors() == []            # 未落库
+
+
+def test_anchor_duplicate_warns(comp, tmp_path, capsys):
+    """同素材重复 anchor：提示但不拒收（新快照语义，缺口③）。"""
+    md = tmp_path / "doc.md"
+    md.write_text("# t\nx", encoding="utf-8")
+    main(["anchor", str(md)], components=comp)
+    capsys.readouterr()
+    main(["anchor", str(md)], components=comp)
+    out = capsys.readouterr().out
+    assert "同素材已有锚点" in out
+    assert len(comp.truth.list_anchors()) == 2        # 两份快照并存
+
+
+def test_anchor_deprecate_blocks_plan_reference(comp, tmp_path, capsys):
+    """锚点作废：真值保留；蒸馏计划引用被 checker 拒收（缺口②）。"""
+    md = tmp_path / "doc.md"
+    md.write_text("# t\nx", encoding="utf-8")
+    main(["anchor", str(md)], components=comp)
+    anchor_id = comp.truth.list_anchors()[0].id
+    main(["anchor", "--deprecate", anchor_id], components=comp)
+    assert "已作废" in capsys.readouterr().out
+    assert comp.truth.anchor_exists(anchor_id)                 # 物理存在
+    assert not comp.truth.anchor_active(anchor_id)             # 引用不合法
+    plan = tmp_path / "p.json"
+    plan.write_text(json.dumps({
+        "driver": "session", "mode": "domain",
+        "domain_root": {"action": "create", "title": "测试领域"},
+        "anchor": anchor_id,
+        "items": [{"action": "create", "aspect": "flow", "parent": "$ROOT",
+                   "title": "流程", "gist": "g",
+                   "source": {"anchor": anchor_id, "turns": [1]}}]},
+        ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(SystemExit):
+        main(["plan", str(plan)], components=comp)
+    assert "已作废" in capsys.readouterr().out
 
 
 def test_anchor_text_channel(comp, capsys):

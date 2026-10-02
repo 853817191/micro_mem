@@ -85,6 +85,21 @@ class InMemoryTruthStore(TruthStore):
             anchor_id = anchor_id[:-3]
         return anchor_id in self._anchors
 
+    def anchor_active(self, ref: str) -> bool:
+        """存在且未作废（蒸馏计划引用的合法性口径）。"""
+        anchor_id = ref.replace("\\", "/").split("/")[-1]
+        if anchor_id.endswith(".md"):
+            anchor_id = anchor_id[:-3]
+        a = self._anchors.get(anchor_id)
+        return a is not None and a.status != "deprecated"
+
+    def deprecate_anchor(self, id: str) -> bool:
+        a = self._anchors.get(id)
+        if a is None:
+            return False
+        a.status = "deprecated"
+        return True
+
     def resync_anchor(self, id: str, content: str) -> bool:
         """替换正文，保留游标等元数据。"""
         a = self._anchors.get(id)

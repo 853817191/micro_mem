@@ -136,7 +136,7 @@ def test_id_sequence_and_list_delete(tmp_path):
 
 
 def test_anchor_save_format_and_readback(tmp_path):
-    """锚点 frontmatter 定序行与旧版一致；游标默认 -1。"""
+    """锚点 frontmatter 定序行：id/title/date/游标/status/source；游标默认 -1。"""
     truth = MarkdownTruthStore(str(tmp_path))
     aid = truth.save_anchor(Anchor(id="", title="会话X", date="", content="对话正文",
                                    source="D:\\sessions\\a.jsonl"))
@@ -148,14 +148,16 @@ def test_anchor_save_format_and_readback(tmp_path):
     assert lines[2] == "title: 会话X"
     assert re.match(r"^date: \d{4}-\d{2}-\d{2}$", lines[3])
     assert lines[4] == "distilled_until: -1"
-    assert lines[5] == "source: D:\\sessions\\a.jsonl"
-    assert lines[6] == "---"
-    assert lines[7] == ""
+    assert lines[5] == "status: active"
+    assert lines[6] == "source: D:\\sessions\\a.jsonl"
+    assert lines[7] == "---"
+    assert lines[8] == ""
     a = truth.get_anchor(aid)
     assert a is not None
     assert a.content == "对话正文"
     assert a.source == "D:\\sessions\\a.jsonl"
     assert a.distilled_until == -1
+    assert a.status == "active"
     assert truth.get_anchor("s-20990101-999") is None
 
 

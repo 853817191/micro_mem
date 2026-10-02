@@ -22,6 +22,7 @@ import json
 import os
 import sys
 
+from ..application.distill_service import DistillService
 from ..application.plan_checker import PlanRejectedError
 from ..composition import Components, assemble
 from ..domain.models import DistillPlan, Knowledge, KnowledgeType, Scope, Source, SourceType
@@ -138,14 +139,26 @@ def _latest_anchor(ctx: Components) -> str:
 
 
 def cmd_anchor(args, ctx: Components) -> None:
-    """anchor：S0 素材解析 →（--preview 确认闸门）→ S1 落库。"""
+    """anchor：S0 素材解析 →（--preview 确认闸门）→ S1 落库；--deprecate 作废锚点。"""
+    if args.deprecate:
+        if args.source or args.text:
+            print("--deprecate 与素材输入互斥：作废已有锚点就不要给新素材")
+            raise SystemExit(1)
+        if ctx.truth.deprecate_anchor(args.deprecate):
+            print(f"锚点已作废: {args.deprecate}（真值保留；新蒸馏计划不得再引用）")
+        else:
+            print(f"未找到锚点: {args.deprecate}")
+            raise SystemExit(1)
+        return
     try:
         if args.text:
             if args.source:
                 print("--text 与 source 互斥：直接输入文本就不要给路径参数")
                 raise SystemExit(1)
+            title = args.title or args.text.strip()[:20]
             if args.preview:
-                _print_preview(ctx.distill.preview_turns(text=args.text), "inline-text")
+                _print_preview(ctx.distill.preview_turns(text=args.text),
+                               "inline-text", title)
                 return
             anchor_id = ctx.distill.anchor_text(args.text, title=args.title)
             if not anchor_id:
@@ -157,9 +170,12 @@ def cmd_anchor(args, ctx: Components) -> None:
                               and not os.path.exists(source)):
                 print("未找到素材：mem anchor <路径|URL>，或 mem anchor --text \"描述\"")
                 raise SystemExit(1)
+            title = args.title or DistillService.default_title(source)
             if args.preview:
-                _print_preview(ctx.distill.preview_turns(source=source), source)
+                _print_preview(ctx.distill.preview_turns(source=source),
+                               source, title)
                 return
+            _warn_duplicate_anchor(ctx, source)
             anchor_id = ctx.distill.anchor(source, title=args.title)
             if not anchor_id:
                 print("该素材无有效内容（零轮）")
@@ -173,9 +189,22 @@ def cmd_anchor(args, ctx: Components) -> None:
     print(f"会话长度: {size} 字符")
 
 
-def _print_preview(turns: list[tuple[int, str]], source: str) -> None:
-    """素材确认视图（确认闸门）：轮次摘要清单，人核对遗漏/偏差后再落库。"""
+def _warn_duplicate_anchor(ctx: Components, source: str) -> None:
+    """重复素材提示（不拒收）：同 source 已有锚点 = 将作为新快照入库。"""
+    dups = [a for a in ctx.truth.list_anchors()
+            if a.source == source and a.status != "deprecated"]
+    if dups:
+        ids = "、".join(a.id for a in dups)
+        print(f"提示: 同素材已有锚点 {ids}，本次将作为新快照再入库一份"
+              f"（旧档保留；如旧档有误请先 mem anchor --deprecate <id>）")
+
+
+def _print_preview(turns: list[tuple[int, str]], source: str,
+                   title: str = "") -> None:
+    """素材确认视图（确认闸门）：标题 + 轮次摘要清单，人核对遗漏/偏差后再落库。"""
     print(f"【素材确认】共 {len(turns)} 轮 | 源: {source}")
+    if title:
+        print(f"将生成标题: {title}（可用 --title 覆盖）")
     print("=" * 70)
     for n, t in turns:
         print(f"── turn {n} ──")
@@ -404,6 +433,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("title", nargs="?", default="", help="锚点标题（缺省按来源生成）")
     p.add_argument("--text", default="",
                    help="直接输入一段描述文本（整段=1 turn；与 source 互斥）")
+    p.add_argument("--deprecate", default="",
+                   help="作废已有锚点（逻辑标，真值保留；新计划不得再引用它）")
     p.add_argument("--preview", action="store_true",
                    help="确认闸门：只渲染素材确认视图不落库，核对后再去掉本参数执行")
     p.set_defaults(func=cmd_anchor)

@@ -80,10 +80,23 @@ class TruthStore(ABC):
 
     @abstractmethod
     def anchor_exists(self, ref: str) -> bool:
-        """溯源校验：ref 指向的锚点是否存在。
+        """溯源校验：ref 指向的锚点是否存在（物理存在，含已作废）。
 
         ref 兼容两种形态：纯 id（s-20260929-002）或引用路径（anchors/s-20260929-002.md）。
+        蒸馏计划的引用合法性用 anchor_active（存在且未作废）。
         """
+
+    @abstractmethod
+    def anchor_active(self, ref: str) -> bool:
+        """引用合法性：锚点存在且 status != deprecated。
+
+        蒸馏计划（source.anchor）的校验口径——作废锚点不得被新计划引用，
+        旧计划引用它 confirm 时被 checker 拦下。
+        """
+
+    @abstractmethod
+    def deprecate_anchor(self, id: str) -> bool:
+        """作废锚点（逻辑标，真值保留）；返回锚点是否存在。"""
 
     @abstractmethod
     def resync_anchor(self, id: str, content: str) -> bool:

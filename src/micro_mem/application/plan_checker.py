@@ -74,25 +74,26 @@ Rule = Callable[[DistillPlan, CheckContext], list[CheckIssue]]
 
 
 def _plan_anchor_exists(plan: DistillPlan, ctx: CheckContext) -> list[CheckIssue]:
-    """session 驱动必须有存在的计划级锚点（游标回写目标）。"""
+    """session 驱动必须有存在且未作废的计划级锚点（游标回写目标）。"""
     if plan.driver is not DistillDriver.SESSION:
         return []
     if not plan.anchor:
         return [_err("plan_anchor", "session 驱动的计划缺 anchor 字段")]
-    if not ctx.truth.anchor_exists(plan.anchor):
-        return [_err("plan_anchor", f"锚点不存在: {plan.anchor}")]
+    if not ctx.truth.anchor_active(plan.anchor):
+        return [_err("plan_anchor", f"锚点不存在或已作废: {plan.anchor}")]
     return []
 
 
 def _item_anchor_exists(plan: DistillPlan, ctx: CheckContext) -> list[CheckIssue]:
-    """每项的 source.anchor 必填且存在（skip 也必填——它是"哪几轮不蒸"的载体）。"""
+    """每项的 source.anchor 必填、存在且未作废（skip 也必填——它是"哪几轮不蒸"的载体）。"""
     issues = []
     for i, item in enumerate(plan.items):
         if not item.source_anchor:
             issues.append(_err("item_anchor", "缺 source.anchor", i))
-        elif not ctx.truth.anchor_exists(item.source_anchor):
+        elif not ctx.truth.anchor_active(item.source_anchor):
             issues.append(_err("item_anchor",
-                               f"source.anchor 指向不存在的锚点: {item.source_anchor}", i))
+                               f"source.anchor 指向不存在或已作废的锚点: "
+                               f"{item.source_anchor}", i))
     return issues
 
 
