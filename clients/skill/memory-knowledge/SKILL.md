@@ -1,6 +1,6 @@
 ---
 name: memory-knowledge
-description: micro_mem 记忆知识管理系统入口——查询知识（search/get）+ 蒸馏沉淀对话为知识（anchor/distill/confirm）。触发场景：用户问"查记忆系统""记忆知识""之前讨论过 X""知识管理里的 X""帮我蒸馏""沉淀这段对话"。写入/维护走命令，skill 只管查询与蒸馏。
+description: micro_mem 记忆知识管理系统入口——查询知识（search/get）+ 蒸馏沉淀对话为知识（anchor/distill/plan/confirm 四轮协议）。触发场景：用户问"查记忆系统""记忆知识""之前讨论过 X""知识管理里的 X""帮我蒸馏""沉淀这段对话"。写入/维护走命令，skill 只管查询与蒸馏。
 ---
 
 # micro_mem 记忆知识管理系统
@@ -47,59 +47,25 @@ mem get <id>
 ```
 - 返回：摘要 / 正文 / 关联（parents/links）/ 外部锚点 / 来源（sources）
 - 溯源对话：`Read <MEMORY_HOME>/data/anchors/*.md`
-- 可视化：`python <MEMORY_HOME>/src/micro_mem/cli/server.py`（长驻服务，保持 python 直跑，路径用正斜杠）后访问 http://localhost:8000/
+- 可视化：`mem serve [--port 8000]`（长驻服务）后访问 http://localhost:8000/
 
-## 二、蒸馏对话为知识
+## 二、蒸馏对话为知识（v2 四轮协议）
 
-> **蒸馏前必读同目录三份规范**：先读 `DISTILL_GUIDE.md`（共用篇：type 四分类、主副交给边、title/summary/body 写法、去重、候选格式），再按场景选读 `DISTILL_EVENT.md`（事件模式：先识事件、过程模板、产树）或 `DISTILL_DOMAIN.md`（领域模式：先识领域、领域模板、产网）。
+> **蒸馏前必读 `domain/DISTILL.md`**（领域蒸馏判断指南：R1 定位三选一与坐标选择、R3 正文写作规范）。
+> 本期只做领域蒸馏（mode=domain）；事件蒸馏另立专题（`event/`，未实现）。
+> 旧版蒸馏规范已归档至 `_archive/`（v1 单轮批处理范式，仅历史参考，勿遵循）。
 
-当用户说"帮我蒸馏"或要求沉淀一段对话时：
+机制（供给 / 校验 / 落库 / 游标）全部归系统，AI 只做两个判断点：**R1 定位** 与 **R3 正文写作**。
 
-### 流程
-0. **先判断模式**：这段对话围绕的是「一件事」（事件模式）还是「一个领域」（领域模式）？见 `DISTILL_EVENT.md` / `DISTILL_DOMAIN.md` 的「一句话定位」。
-1. **读取对话**：
-   - 当前上下文对话：直接用（本次会话内容）
-   - 历史锚点：`Read <MEMORY_HOME>/data/anchors/s-*.md`
-2. **检索相关主题（挂靠准备）**：对要沉淀的知识，**先 search 知识库**找相关主题/已有节点；命中则把 id 记入候选的 `suggested_parents` / `suggested_links`
-3. **AI 提炼候选**：
-   - 事件模式：**先立主事件（第一条 event）→ 再拆环节挂靠**（环节 `suggested_parents` 指向主事件）
-   - 领域模式：**先立领域根（model）→ 再拆子网**（子节点 `suggested_parents` 挂根/子领域，跨领域用 `suggested_links`）
-   - 按下方 JSON 格式产出候选清单 → 写入 `<MEMORY_HOME>/data/temp/candidates.json`
-4. **用户 review**：展示候选清单，用户标注 keep / edit / reject（改 decision 字段）
-5. **确认落库**：
-   ```
-   mem confirm <MEMORY_HOME>/data/temp/candidates.json
-   ```
-   落库后系统会尝试**自动挂靠**到相关主题节点（见蒸馏原则-同类聚合）
+1. **R1 定位**（AI 产计划草案，只写坐标 + gist，**不写正文**）：
+   - 会话驱动（维护期增量）：`mem distill <anchor_id>` → 系统供增量轮次全文 + 预检索相关子树
+   - 主题驱动（建树/补全期）：`mem distill --domain <领域>` → 系统供领域树全景 + 相关锚点清单 + 空缺统计
+2. **R2 审计划**（用户）：审结构变更单——蒸什么 / 长在哪 / 跳过什么；批准 / 改坐标 / 增删项
+3. **R3 成型**（AI）：`mem plan <计划文件>` 提交归档（得 plan_id）→ 逐条**只回读 source.turns 标注的轮次原文**，写 title/summary/body 填回归档计划文件（`data/plans/plan-<id>.json`）
+4. **R4 落库**（系统）：`mem confirm <plan_id>` → 硬校验 + 幂等落库 + 计划回写归档（`data/plans/`）+ 游标回写（仅会话驱动；主题驱动不推游标）
 
-完整蒸馏命令（包装器已封装，路径坑在壳内解决）：
+配套命令：
+
 ```
-mem anchor <jsonl_path>        # 建锚点：jsonl → data/anchors/s-*.md（缺路径时自动取最新会话）
-mem distill <anchor_id>        # 增量准备：重同步锚点 + 输出增量轮次（写 distill_state.json）
-mem confirm <candidates.json>  # 落库：幂等去重 + 溯源校验 + 回写蒸馏游标 + 自动挂靠
+mem anchor <jsonl_path>   # 建锚点：jsonl → data/anchors/s-*.md（缺路径时自动取最新会话）
 ```
-
-### 候选 JSON 格式
-```json
-[
-  {
-    "type": "event | model | fact | method",
-    "scope": "universal | domain | personal",
-    "title": "知识标题",
-    "summary": "判断用摘要（3~5 句）",
-    "body": "正文",
-    "suggested_parents": ["k-0004"],     // 挂靠建议（可空）
-    "suggested_links": ["k-0005"],       // 关联建议（可空）
-    "sources": [{"type": "conversation_distilled", "ref": "anchors/s-xxx.md"}],
-    "decision": "keep | edit | reject",
-    "edit_id": ""                        // 仅 decision=edit 时填：指向要更新的知识 id
-  }
-]
-```
-
-### 蒸馏原则
-- **值得沉淀**：问题解决过程、可复用经验/方法、达成的决策、领域共识
-- **不值得沉淀**：闲聊、一次性问答、纯操作过程
-- 候选的 suggested_parents/links 由 AI 给出，用户 review 时可改
-- **同类知识聚合**：同一类工作事项（如"Nginx 反向代理配置"）应挂靠到已有主题节点，不散落成游离事情
-- **先展示候选，用户确认后才落库**（不自动入库）
