@@ -138,19 +138,51 @@ def _latest_anchor(ctx: Components) -> str:
 
 
 def cmd_anchor(args, ctx: Components) -> None:
-    """anchor：会话 jsonl（含工具过程，全量保真）→ 锚点。"""
-    path = args.jsonl or _find_newest_session()
-    if not path or not os.path.exists(path):
-        print("未找到 jsonl 会话文件，请传入路径: mem anchor <jsonl_path>")
-        raise SystemExit(1)
-    anchor_id = ctx.distill.anchor(path, title=args.title or os.path.basename(path))
-    if not anchor_id:
-        print("该会话无可提取的对话文本")
+    """anchor：S0 素材解析 →（--preview 确认闸门）→ S1 落库。"""
+    try:
+        if args.text:
+            if args.source:
+                print("--text 与 source 互斥：直接输入文本就不要给路径参数")
+                raise SystemExit(1)
+            if args.preview:
+                _print_preview(ctx.distill.preview_turns(text=args.text), "inline-text")
+                return
+            anchor_id = ctx.distill.anchor_text(args.text, title=args.title)
+            if not anchor_id:
+                print("空文本，无可入库内容")
+                raise SystemExit(1)
+        else:
+            source = args.source or _find_newest_session()
+            if not source or (not source.startswith(("http://", "https://"))
+                              and not os.path.exists(source)):
+                print("未找到素材：mem anchor <路径|URL>，或 mem anchor --text \"描述\"")
+                raise SystemExit(1)
+            if args.preview:
+                _print_preview(ctx.distill.preview_turns(source=source), source)
+                return
+            anchor_id = ctx.distill.anchor(source, title=args.title)
+            if not anchor_id:
+                print("该素材无有效内容（零轮）")
+                raise SystemExit(1)
+    except ValueError as e:
+        print(e)
         raise SystemExit(1)
     a = ctx.truth.get_anchor(anchor_id)
     size = len(a.content) if a else 0
     print(f"锚点已保存: {anchor_id} → data/anchors/{anchor_id}.md")
     print(f"会话长度: {size} 字符")
+
+
+def _print_preview(turns: list[tuple[int, str]], source: str) -> None:
+    """素材确认视图（确认闸门）：轮次摘要清单，人核对遗漏/偏差后再落库。"""
+    print(f"【素材确认】共 {len(turns)} 轮 | 源: {source}")
+    print("=" * 70)
+    for n, t in turns:
+        print(f"── turn {n} ──")
+        print(t if len(t) <= 200 else t[:200] + "……")
+        print()
+    print("核对轮次切分与内容完整性。确认无误后去掉 --preview 执行正式入库；")
+    print("有遗漏/偏差：修正素材后重新 --preview。")
 
 
 def cmd_distill(args, ctx: Components) -> None:
@@ -366,9 +398,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--mode", default="backfill", help="backfill|incremental")
     p.set_defaults(func=cmd_import)
 
-    p = sub.add_parser("anchor", help="会话 jsonl → 保真锚点")
-    p.add_argument("jsonl", nargs="?", default="", help="会话 jsonl 路径（缺省取最新会话）")
-    p.add_argument("title", nargs="?", default="", help="锚点标题（缺省用文件名）")
+    p = sub.add_parser("anchor", help="素材（jsonl/md/html/URL/--text）→ 保真锚点")
+    p.add_argument("source", nargs="?", default="",
+                   help="素材路径或 http(s) URL（jsonl 缺省取最新会话）")
+    p.add_argument("title", nargs="?", default="", help="锚点标题（缺省按来源生成）")
+    p.add_argument("--text", default="",
+                   help="直接输入一段描述文本（整段=1 turn；与 source 互斥）")
+    p.add_argument("--preview", action="store_true",
+                   help="确认闸门：只渲染素材确认视图不落库，核对后再去掉本参数执行")
     p.set_defaults(func=cmd_anchor)
 
     p = sub.add_parser("distill", help="增量蒸馏准备 / --domain 领域盘点")

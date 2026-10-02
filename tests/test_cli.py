@@ -146,6 +146,9 @@ def test_anchor_distill_plan_confirm_flow(tmp_path, capsys):
         "anchor": anchor_id,
         "items": [
             {"action": "create", "aspect": "flow", "parent": "$ROOT",
+             "title": "流程", "gist": "流程轴节点",
+             "source": {"anchor": anchor_id, "turns": [1]}},
+            {"action": "create", "aspect": "flow", "parent": "$AXIS:flow",
              "title": "第一轮流程", "gist": "第1问的流程知识",
              "source": {"anchor": anchor_id, "turns": [1]}},
             {"action": "skip", "gist": "第2问是闲聊，无领域知识",
@@ -157,25 +160,32 @@ def test_anchor_distill_plan_confirm_flow(tmp_path, capsys):
     assert m, out
     plan_id = m.group(1)
     assert "增量轮次全集: [1, 2]" in out
-    # R3：AI 在归档文件上原地填充正文（单文件演进）
+    # R3：AI 在归档文件上原地填充正文（单文件演进；轴节点与叶子都填）
     plan = comp.truth.get_plan(plan_id)
-    plan.items[0].summary = "流程摘要"
-    plan.items[0].body = "流程正文"
+    plan.items[0].summary = "流程轴摘要"
+    plan.items[0].body = "流程轴正文"
+    plan.items[1].summary = "流程摘要"
+    plan.items[1].body = "流程正文"
     comp.truth.save_plan(plan)
-    # confirm（$ROOT 两段式 + 游标回写 + 计划回写）
+    # confirm（$ROOT/$AXIS 三段式 + 游标回写 + 计划回写）
     main(["confirm", plan_id], components=comp)
     out = capsys.readouterr().out
-    assert "落库完成" in out and "新建 2 条" in out and "跳过 1 条" in out
+    assert "落库完成" in out and "新建 3 条" in out and "跳过 1 条" in out
     assert f"已更新锚点蒸馏游标: {anchor_id}.distilled_until = 2" in out
     root = comp.search.get("k-0001")
     assert root is not None and root.title == "测试领域" and root.aspect == ""
-    child = comp.search.get("k-0002")
-    assert child is not None
-    assert child.parents == ["k-0001"]                       # $ROOT → 实际 id
-    assert child.aspect == "flow" and child.sources[0].turns == [1]
+    axis_node = comp.search.get("k-0002")
+    assert axis_node is not None
+    assert axis_node.parents == ["k-0001"]                   # $ROOT → 实际 id
+    assert axis_node.aspect == "flow"
+    leaf = comp.search.get("k-0003")
+    assert leaf is not None
+    assert leaf.parents == ["k-0002"]                        # $AXIS:flow → 轴节点 id
+    assert leaf.aspect == "flow" and leaf.sources[0].turns == [1]
     archived = comp.truth.get_plan(plan_id)
     assert archived.status == "confirmed"
     assert archived.items[0].result_knowledge_id == "k-0002"
+    assert archived.items[1].result_knowledge_id == "k-0003"
     # prepare 之后：增量为空
     main(["distill", anchor_id], components=comp)
     assert "本轮增量 turn 2..2" in capsys.readouterr().out
@@ -208,7 +218,29 @@ def test_plan_rejected_on_bad_coordinates(tmp_path, capsys):
 def test_anchor_missing_path(comp, capsys):
     with pytest.raises(SystemExit):
         main(["anchor", "nonexistent.jsonl"], components=comp)
-    assert "未找到 jsonl 会话文件" in capsys.readouterr().out
+    assert "未找到素材" in capsys.readouterr().out
+
+
+def test_anchor_preview_gate(comp, tmp_path, capsys):
+    """确认闸门：--preview 只渲染素材确认视图，不落库。"""
+    md = tmp_path / "doc.md"
+    md.write_text("# 概述\n甲\n\n## 流程\n乙", encoding="utf-8")
+    main(["anchor", str(md), "--preview"], components=comp)
+    out = capsys.readouterr().out
+    assert "【素材确认】共 2 轮" in out
+    assert "── turn 1 ──" in out and "── turn 2 ──" in out
+    assert "去掉 --preview" in out
+    assert comp.truth.list_anchors() == []            # 未落库
+
+
+def test_anchor_text_channel(comp, capsys):
+    """--text 通道：对话里直接贴的描述 → 单轮锚点。"""
+    main(["anchor", "--text", "用户口述的需求单流程"], components=comp)
+    out = capsys.readouterr().out
+    assert "锚点已保存: s-" in out
+    anchors = comp.truth.list_anchors()
+    assert len(anchors) == 1 and anchors[0].source == "inline-text"
+    assert "用户口述的需求单流程" in anchors[0].content
 
 
 # ================= 主题驱动盘点（distill --domain，阶段3） =================

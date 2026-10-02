@@ -21,6 +21,7 @@ from .infrastructure.hash_embedder import HashEmbedder
 from .infrastructure.markdown_truth import MarkdownTruthStore
 from .infrastructure.memory_index import InMemoryIndexStore
 from .infrastructure.memory_truth import InMemoryTruthStore
+from .infrastructure.parsers import default_parsers
 from .infrastructure.sqlite_index import SqliteIndexStore
 
 
@@ -50,7 +51,8 @@ def _wire(truth: TruthStore, index: IndexStore, embedder: Embedder,
         truth=truth, index=index, embedder=embedder,
         knowledge=knowledge, search=search,
         distill=DistillService(truth, index, knowledge, search=search,
-                               aspects=aspects, view_config=view_config),
+                               aspects=aspects, view_config=view_config,
+                               parsers=default_parsers()),
         importer=ImportService(truth),
         rebuild=RebuildService(truth, index, embedder),
         config=config)

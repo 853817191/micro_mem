@@ -212,9 +212,10 @@ class Anchor:
 
 
 class PlanAction(Enum):
-    """计划项动作：素材命运的全集（蒸馏判断的产出就这三种）。"""
+    """计划项动作：素材命运的全集（蒸馏判断的产出就这四种）。"""
     CREATE = "create"            # 新建知识节点
-    EDIT = "edit"                # 更新已有节点
+    EDIT = "edit"                # 更新已有节点（title/summary/body/aspect 全量替换，坐标不动）
+    MOVE = "move"                # 挪坐标（edit_id 指向的节点改挂 parent，内容不动，可带 aspect 跨轴）
     SKIP = "skip"                # 明确不蒸（负知识留痕，治"悄悄漏掉 vs 明确不蒸"之辨）
 
 
@@ -234,12 +235,25 @@ class ItemResult(Enum):
     """计划项的落库结果（confirm 回写）。"""
     CREATED = "created"
     EDITED = "edited"
+    MOVED = "moved"
     SKIPPED = "skipped"
 
 
 # parent 字段的保留字：引用本次计划新建的领域根（confirm 先落根再替换为实际 id）——
 # 旧流程 MAIN 两段式 hack 的正式化：显式、只在新建根时出现、经计划审查
 ROOT_PLACEHOLDER = "$ROOT"
+
+# parent 字段的轴占位符："$AXIS:<轴名>" 引用领域某轴的轴节点——树形三层
+# （根 → 轴节点 → 叶子）的寻址方式：叶子不直接挂根，挂 $AXIS:flow 等占位，
+# confirm 时先落/查轴节点（得真实 id）再替换（与 $ROOT 同构的两段式）。
+AXIS_PLACEHOLDER_PREFIX = "$AXIS:"
+
+
+def parse_axis_placeholder(parent: str) -> str | None:
+    """解析轴占位符："$AXIS:flow" → "flow"；非占位返回 None。"""
+    if parent.startswith(AXIS_PLACEHOLDER_PREFIX):
+        return parent[len(AXIS_PLACEHOLDER_PREFIX):]
+    return None
 
 # 计划状态机：draft（AI 手写）→ approved（submit 归档）→ confirmed（confirm 落库回写）
 PLAN_STATUSES = ("draft", "approved", "confirmed")

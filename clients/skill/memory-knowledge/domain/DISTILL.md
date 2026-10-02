@@ -33,16 +33,25 @@
 值得蒸：可复用的流程 / 结构 / 规则 / 约束 / 设计理由。
 不值得蒸（skip 的对象）：闲聊寒暄、一次性问答、纯操作过程（无结论）、环境调试、与本领域无关的内容、决策未定的中间态。
 
-### 2.2 坐标选择：长在哪
+### 2.2 坐标选择：长在哪（根 → 轴 → 叶子 三层）
 
-1. **领域根**：核心业务单据的完整生命周期 = 一个领域根。
-   - 先确认根已存在（全景 / 预检索里有）→ `domain_root.action = "existing"`；确实没有才 `"create"`（根的 title/summary/body 随 domain_root 字段一次写全）。
-2. **aspect 四轴归属**（值域以 `distill.aspects` 配置为准）：
+树形固定三层：**领域根 → 轴节点 → 叶子节点**。根的孩子只有轴节点；叶子必须挂轴下——
+平铺挂根 = 灌木（旧产物 14 节点平铺已被否决：40 节点时导航崩溃）。
+
+1. **第 1 步定轴**：这条知识属于哪根轴？（值域以 `distill.aspects` 配置为准）
    - `flow` 流程：怎么流转——步骤、分支条件、接口编排
    - `structure` 结构：长什么样——实体 / 表 / 字段、状态机、枚举
    - `boundary` 边界：和谁交互——外部调用、入口、契约、上下游
    - `constraint` 约束：必须遵守什么——规则、校验、坑、违反后果
-3. **parent 挂谁**：纵向从属。拆子节点的唯一开关 = **可独立检索 / 可独立演进**——能则拆，不能则并进父节点 body，不硬拆。
+2. **第 2 步轴内定位**：该轴下有没有已有节点覆盖同主题？
+   - 有 → edit；可独立检索 / 可独立演进 → 新叶子挂该轴下；不能 → 并进已有节点 body，不硬拆
+3. **parent 写法**（叶子不写根）：
+   - 叶子：`"parent": "$AXIS:flow"`——轴占位符，confirm 时解析为该轴节点真实 id（与 $ROOT 同构的两段式）
+   - 轴节点：`"parent": "$ROOT"`；存量轴节点已有 id 时也可直接写 id
+4. **轴节点什么时候建**：新领域（domain_root.action=create）按需建——有叶子才建轴，空轴是噪音；
+   存量领域蒸出某轴第一条知识时，先建该轴节点再挂。轴节点格式：
+   `{"action": "create", "aspect": "flow", "parent": "$ROOT", "title": "流程", ...}`
+   title 用轴名（流程 / 结构 / 边界 / 约束），正文概述该轴管什么。
 
 ### 2.3 gist 与 source.turns 纪律
 
@@ -116,7 +125,8 @@
 ### 3.5 落库前自检（判断性条目；机制性条目 checker 已硬拦，不在此列）
 
 - [ ] 三选一判对了吗？（已有主题该 edit 却 create？该 skip 的悄悄漏了？）
-- [ ] 轴归属判对了吗？（流程写进 structure？约束写进 flow？）
+- [ ] 定轴判对了吗？（流程写进 structure？约束写进 flow？）
+- [ ] 坐标是三层吗？（叶子挂 `$AXIS:<轴>` 而不是平铺挂根？轴节点建了吗？）
 - [ ] title 全局可区分？（对象词带领域限定，一搜不撞车）
 - [ ] summary 第一句是结论？遮住 body 只看 summary 能说出"这是什么"？
 - [ ] 检索词只住了 summary？（违规：必须在 title 或 body）
@@ -132,11 +142,18 @@
   "domain_root": {"action": "existing", "id": "k-0022"},
   "anchor": "s-20260929-001",
   "items": [
-    {"action": "create", "aspect": "flow", "parent": "k-0022",
-     "title": "……", "gist": "……",
+    {"action": "create", "aspect": "flow", "parent": "$ROOT",
+     "title": "流程", "gist": "建流程轴（新领域按需建轴）",
+     "source": {"anchor": "s-20260929-001", "turns": [5, 6]}},
+    {"action": "create", "aspect": "flow", "parent": "$AXIS:flow",
+     "title": "国际机票需求单创建流程", "gist": "……",
      "source": {"anchor": "s-20260929-001", "turns": [5, 6]}},
     {"action": "edit", "edit_id": "k-0024", "aspect": "structure",
      "title": "……", "gist": "……",
+     "source": {"anchor": "s-20260929-001", "turns": [9]}},
+    {"action": "move", "edit_id": "k-0030",
+     "parent": "$AXIS:boundary", "aspect": "boundary",
+     "gist": "k-0030 是边界知识，从 flow 轴下挪到 boundary 轴下",
      "source": {"anchor": "s-20260929-001", "turns": [9]}},
     {"action": "skip", "gist": "turn 12-15 为环境调试，无领域知识",
      "source": {"anchor": "s-20260929-001", "turns": [12, 13, 14, 15]}}
@@ -147,12 +164,15 @@
 要点：
 
 - `driver=session` 时计划级 `anchor` 必填（游标回写目标）；`driver=topic` 无计划级 anchor、不推游标。
-- `domain_root.action="create"` 时，新建子节点的 `parent` 写 `"$ROOT"` 占位（confirm 先落根得到真实 id 再替换）。
+- `domain_root.action="create"` 时，轴节点的 `parent` 写 `"$ROOT"` 占位（confirm 先落根得到真实 id 再替换）；叶子的 `parent` 写 `"$AXIS:<轴>"` 占位（confirm 先落/查轴节点再替换）。
+- **move 项**（挪坐标，edit 的"坐标不动"缺口补充）：`edit_id` = 被挪节点，`parent` = 新坐标（支持 `$AXIS:<轴>`），内容（title/summary/body）不动；带 `aspect` = 跨轴换轴，不带 = 轴不变。`$ROOT` 不允许（挪到根下无意义）。
 - R1 草案**不含** summary/body；R3 在归档后的计划文件（`data/plans/plan-<id>.json`）上原地填充，再 confirm。
 - skip 项也必须带 `source.anchor` + `turns`（"哪几轮不蒸"的留痕载体）。
 
 ## 5. 人机分工边界（别越界）
 
-**系统已硬拦，不用自检**：锚点存在性、edit_id / parent 合法性、aspect 值域、非 skip 项 title 必填、领域根重名（拒收）；轮次覆盖完整性、create 与活跃节点同 title、aspect 与父节点不一致（警告）。权威清单见设计文档 6.2。
+**系统已硬拦，不用自检**：锚点存在性、edit_id / parent 合法性、aspect 值域、非 skip 项 title 必填、领域根重名（拒收）；`$AXIS` 悬空与占位和 aspect 不一致（拒收）、move 成环 / move 挂 `$ROOT`（拒收）；轮次覆盖完整性、create 与活跃节点同 title、aspect 与父节点不一致、叶子直接挂根（警告，轴节点豁免）。权威清单见 `src/micro_mem/application/plan_checker.py` 的 RULES 表。
 
-**系统管不了，全靠判断**：三选一、轴归属、parent 选择、gist 质量、正文质量、skip 理由的真实性。
+**类型口径（勿问）**：领域蒸馏整树 `type=model / scope=domain`（根、轴节点、叶子一致），不落别的 type；领域内结构表达靠 **aspect + 树坐标**，不靠 type。
+
+**系统管不了，全靠判断**：三选一、定轴（第 1 步）、轴内定位（第 2 步）、parent 选择、gist 质量、正文质量、skip 理由的真实性。

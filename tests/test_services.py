@@ -57,6 +57,46 @@ def _write_jsonl(path, turns: list[list[tuple[str, str]]]) -> None:
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
+# ================= S0 素材通道（parsers 经 _wire 全量注入） =================
+
+def test_anchor_is_self_sufficient_source_deleted_prepare_still_works(tmp_path):
+    """锚点自足（D3）：S1 落盘后源文件可删，prepare 只认锚点正文切轮。"""
+    comp = assemble_inmemory()
+    f = tmp_path / "s.jsonl"
+    _write_jsonl(f, [[("user", "第一问")]])
+    anchor_id = comp.distill.anchor(str(f))
+    f.unlink()                                        # 源文件删除
+    dctx = comp.distill.prepare(anchor_id)            # 不得抛"无有效源"
+    assert [n for n, _ in dctx.delta_turns] == [1]
+
+
+def test_anchor_text_inline_channel(comp):
+    """--text 通道：对话中直接给的一段描述 = 单轮锚点。"""
+    anchor_id = comp.distill.anchor_text("用户口述的流程描述", title="口述素材")
+    a = comp.truth.get_anchor(anchor_id)
+    assert a.title == "口述素材" and a.source == "inline-text"
+    assert "## user\n用户口述的流程描述" in a.content
+    assert comp.distill.preview_turns(text="用户口述的流程描述") == \
+        [(1, "## user\n用户口述的流程描述")]
+    assert comp.distill.anchor_text("   ") == ""      # 空文本拒收
+
+
+def test_anchor_md_file_channel(comp, tmp_path):
+    """md 通道：按标题切轮入库。"""
+    f = tmp_path / "doc.md"
+    f.write_text("# 概述\n甲\n\n## 报价流程\n乙", encoding="utf-8")
+    anchor_id = comp.distill.anchor(str(f))
+    dctx = comp.distill.prepare(anchor_id)
+    assert [n for n, _ in dctx.delta_turns] == [1, 2]
+
+
+def test_anchor_unsupported_format_rejected(comp, tmp_path):
+    f = tmp_path / "a.xyz"
+    f.write_text("内容", encoding="utf-8")
+    with pytest.raises(ValueError, match="不支持的素材格式"):
+        comp.distill.anchor(str(f))
+
+
 def _anchor_for(comp, tmp_path, turns=None) -> str:
     """造会话 jsonl 并锚定，返回 anchor_id。"""
     turns = turns or [
@@ -349,8 +389,11 @@ def test_submit_plan_archives_and_backfills_expected_turns(comp, tmp_path):
     anchor_id = _anchor_for(comp, tmp_path)
     comp.distill.prepare(anchor_id)
     root = _mk_root(comp)
+    comp.knowledge.create(Knowledge(
+        type=KnowledgeType.MODEL, scope=Scope.DOMAIN, title="流程",
+        summary="轴", aspect="flow", parents=[root]))
     plan, warnings = comp.distill.submit_plan(_mk_plan(anchor_id, [
-        _mk_item(anchor_id, parent=root),
+        _mk_item(anchor_id, parent="$AXIS:flow"),
         _mk_item(anchor_id, action=PlanAction.SKIP, gist="环境调试"),
     ], root))
     assert plan.plan_id.startswith("plan-")
@@ -407,7 +450,7 @@ def test_submit_plan_rejects_duplicate_domain_root(comp, tmp_path):
 
 
 def test_confirm_creates_tree_with_root_placeholder(comp, tmp_path):
-    """$ROOT 两段式：新根先落库，子节点 parent 占位替换为实际 id；计划回写归档。"""
+    """$ROOT/$AXIS 三段式：新根先落库 → 轴节点 → 叶子占位替换为实际 id；计划回写归档。"""
     anchor_id = _anchor_for(comp, tmp_path)
     comp.distill.prepare(anchor_id)
     plan, _ = comp.distill.submit_plan(DistillPlan(
@@ -415,25 +458,28 @@ def test_confirm_creates_tree_with_root_placeholder(comp, tmp_path):
         domain_root=DomainRoot(action="create", title="测试领域",
                                summary="根摘要", body="根正文"),
         items=[
-            _mk_item(anchor_id, parent="$ROOT", title="创建流程", aspect="flow"),
-            _mk_item(anchor_id, parent="$ROOT", title="需求单实体",
-                     aspect="structure", source_turns=[2]),
+            _mk_item(anchor_id, parent="$ROOT", title="流程", aspect="flow"),
+            _mk_item(anchor_id, parent="$AXIS:flow", title="创建流程",
+                     aspect="flow"),
             _mk_item(anchor_id, action=PlanAction.SKIP, gist="闲聊",
                      source_turns=[]),
         ]))
     _elaborate(comp, plan.plan_id)
     result = comp.distill.confirm_plan(plan.plan_id)
-    assert len(result.created_ids) == 3                  # 根 + 2 子节点
+    assert len(result.created_ids) == 3                  # 根 + 轴节点 + 叶子
     root_id = result.created_ids[0]
     root = comp.search.get(root_id)
     assert root.title == "测试领域" and root.type is KnowledgeType.MODEL
     assert root.aspect == ""                             # 领域根不带切面
     assert root.sources[0].turns == [1, 2]               # 根溯源 = 计划轮次并集
-    flow_node = comp.search.get(result.created_ids[1])
-    assert flow_node.parents == [root_id]                # $ROOT → 实际 id
-    assert flow_node.aspect == "flow"
-    assert flow_node.sources[0].ref == anchor_id
-    assert flow_node.sources[0].turns == [1, 2]          # 轮次级溯源落库
+    axis_node = comp.search.get(result.created_ids[1])
+    assert axis_node.parents == [root_id]                # $ROOT → 实际 id
+    assert axis_node.aspect == "flow"
+    leaf = comp.search.get(result.created_ids[2])
+    assert leaf.parents == [axis_node.id]                # $AXIS:flow → 轴节点 id
+    assert leaf.aspect == "flow"
+    assert leaf.sources[0].ref == anchor_id
+    assert leaf.sources[0].turns == [1, 2]               # 轮次级溯源落库
     assert result.skipped == 1
     assert result.cursor_updated == anchor_id
     assert comp.truth.get_distill_cursor(anchor_id) == 2  # max(items turns)
@@ -443,10 +489,127 @@ def test_confirm_creates_tree_with_root_placeholder(comp, tmp_path):
     assert archived.domain_root.id == root_id
     assert archived.items[0].result is ItemResult.CREATED
     assert archived.items[0].result_knowledge_id == result.created_ids[1]
+    assert archived.items[1].result is ItemResult.CREATED
+    assert archived.items[1].result_knowledge_id == result.created_ids[2]
     assert archived.items[2].result is ItemResult.SKIPPED
     # 重复 confirm 拒绝
     with pytest.raises(ValueError, match="重复 confirm"):
         comp.distill.confirm_plan(plan.plan_id)
+
+
+def test_confirm_resolves_axis_against_library(comp, tmp_path):
+    """existing 根 + 库中已有轴节点：叶子的 $AXIS 占位 confirm 解析为轴节点 id。"""
+    anchor_id = _anchor_for(comp, tmp_path)
+    comp.distill.prepare(anchor_id)
+    root = _mk_root(comp)
+    axis = comp.knowledge.create(Knowledge(
+        type=KnowledgeType.MODEL, scope=Scope.DOMAIN, title="流程",
+        summary="轴", aspect="flow", parents=[root]))
+    plan, _ = comp.distill.submit_plan(_mk_plan(anchor_id, [
+        _mk_item(anchor_id, parent="$AXIS:flow"),
+    ], root))
+    _elaborate(comp, plan.plan_id)
+    result = comp.distill.confirm_plan(plan.plan_id)
+    leaf = comp.search.get(result.created_ids[0])
+    assert leaf.parents == [axis]
+
+
+def test_axis_placeholder_dangling_rejected(comp, tmp_path):
+    """$AXIS 悬空（计划未建该轴、库中也不存在）→ submit 拒收。"""
+    anchor_id = _anchor_for(comp, tmp_path)
+    root = _mk_root(comp)
+    with pytest.raises(PlanRejectedError) as ei:
+        comp.distill.submit_plan(_mk_plan(anchor_id, [
+            _mk_item(anchor_id, parent="$AXIS:flow"),
+        ], root))
+    assert any("悬空" in i.format() for i in ei.value.issues)
+
+
+def test_axis_placeholder_mismatched_aspect_rejected(comp, tmp_path):
+    """$AXIS:flow 挂 aspect=structure → 占位与轴不一致，submit 拒收。"""
+    anchor_id = _anchor_for(comp, tmp_path)
+    root = _mk_root(comp)
+    comp.knowledge.create(Knowledge(
+        type=KnowledgeType.MODEL, scope=Scope.DOMAIN, title="流程",
+        summary="轴", aspect="flow", parents=[root]))
+    with pytest.raises(PlanRejectedError) as ei:
+        comp.distill.submit_plan(_mk_plan(anchor_id, [
+            _mk_item(anchor_id, parent="$AXIS:flow", aspect="structure"),
+        ], root))
+    assert any("不一致" in i.format() for i in ei.value.issues)
+
+
+def test_leaf_direct_on_root_warns_for_existing_root(comp, tmp_path):
+    """existing 根场景叶子直接挂根 → leaf_direct_on_root 警告（轴已在库中，挂根=平铺）。"""
+    anchor_id = _anchor_for(comp, tmp_path)
+    root = _mk_root(comp)
+    _, warnings = comp.distill.submit_plan(_mk_plan(anchor_id, [
+        _mk_item(anchor_id, parent=root),
+    ], root))
+    assert any("leaf_direct_on_root" in w.format() for w in warnings)
+
+
+def test_move_relocates_node_and_merges_sources(comp, tmp_path):
+    """move：挪 parents（可带 aspect 跨轴换轴）；title/summary/body 不动，溯源累积。"""
+    anchor_id = _anchor_for(comp, tmp_path)
+    comp.distill.prepare(anchor_id)
+    root = _mk_root(comp)
+    flow_axis = comp.knowledge.create(Knowledge(
+        type=KnowledgeType.MODEL, scope=Scope.DOMAIN, title="流程",
+        summary="轴", aspect="flow", parents=[root]))
+    boundary_axis = comp.knowledge.create(Knowledge(
+        type=KnowledgeType.MODEL, scope=Scope.DOMAIN, title="边界",
+        summary="轴", aspect="boundary", parents=[root]))
+    leaf = comp.knowledge.create(Knowledge(
+        type=KnowledgeType.MODEL, scope=Scope.DOMAIN, title="创建流程",
+        summary="摘要", body="正文", aspect="flow", parents=[flow_axis],
+        sources=[Source(SourceType.CONVERSATION_DISTILLED, anchor_id, [1])]))
+    comp.truth.set_distill_cursor(anchor_id, 1)          # 增量 = turn 2
+    plan, _ = comp.distill.submit_plan(_mk_plan(anchor_id, [
+        _mk_item(anchor_id, action=PlanAction.MOVE, edit_id=leaf,
+                 parent="$AXIS:boundary", aspect="boundary",
+                 source_turns=[2]),
+    ], root))
+    result = comp.distill.confirm_plan(plan.plan_id)
+    assert result.edited_ids == [leaf]
+    moved = comp.search.get(leaf)
+    assert moved.parents == [boundary_axis]              # 挪到边界轴下
+    assert moved.aspect == "boundary"                    # 跨轴换轴
+    assert moved.title == "创建流程" and moved.summary == "摘要"   # 内容不动
+    assert moved.sources[0].turns == [1, 2]              # 溯源累积合并
+
+
+def test_move_cycle_rejected(comp, tmp_path):
+    """move 成环：把父节点挪到自己子节点下 → submit 拒收。"""
+    anchor_id = _anchor_for(comp, tmp_path)
+    root = _mk_root(comp)
+    parent_node = comp.knowledge.create(Knowledge(
+        type=KnowledgeType.MODEL, scope=Scope.DOMAIN, title="父",
+        summary="父", aspect="flow", parents=[root]))
+    child = comp.knowledge.create(Knowledge(
+        type=KnowledgeType.MODEL, scope=Scope.DOMAIN, title="子",
+        summary="子", aspect="flow", parents=[parent_node]))
+    with pytest.raises(PlanRejectedError) as ei:
+        comp.distill.submit_plan(_mk_plan(anchor_id, [
+            _mk_item(anchor_id, action=PlanAction.MOVE, edit_id=parent_node,
+                     parent=child, aspect="flow"),
+        ], root))
+    assert any("move_no_cycle" in i.format() for i in ei.value.issues)
+
+
+def test_move_root_parent_rejected(comp, tmp_path):
+    """move 的 parent 不允许 $ROOT（挪到根下无意义）→ submit 拒收。"""
+    anchor_id = _anchor_for(comp, tmp_path)
+    root = _mk_root(comp)
+    axis = comp.knowledge.create(Knowledge(
+        type=KnowledgeType.MODEL, scope=Scope.DOMAIN, title="流程",
+        summary="轴", aspect="flow", parents=[root]))
+    with pytest.raises(PlanRejectedError) as ei:
+        comp.distill.submit_plan(_mk_plan(anchor_id, [
+            _mk_item(anchor_id, action=PlanAction.MOVE, edit_id=axis,
+                     parent="$ROOT", aspect="flow"),
+        ], root))
+    assert any("parent_valid" in i.format() for i in ei.value.issues)
 
 
 def test_confirm_edit_merges_sources_and_updates(comp, tmp_path):
@@ -560,10 +723,13 @@ def test_topic_plan_confirm_does_not_advance_cursor(comp, tmp_path):
     """topic 驱动不推游标（游标归会话驱动的增量边界）：items 带锚点轮次也不动。"""
     anchor_id = _anchor_for(comp, tmp_path)
     root = _mk_root(comp)
+    comp.knowledge.create(Knowledge(
+        type=KnowledgeType.MODEL, scope=Scope.DOMAIN, title="流程",
+        summary="轴", aspect="flow", parents=[root]))
     plan, _ = comp.distill.submit_plan(DistillPlan(
         driver=DistillDriver.TOPIC,                      # 主题驱动：无计划级 anchor
         domain_root=DomainRoot(action="existing", id=root),
-        items=[_mk_item(anchor_id, parent=root)]))
+        items=[_mk_item(anchor_id, parent="$AXIS:flow")]))
     assert plan.expected_turns == []                     # 非 session → 无轮次基线
     _elaborate(comp, plan.plan_id)
     result = comp.distill.confirm_plan(plan.plan_id)

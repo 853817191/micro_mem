@@ -51,7 +51,7 @@ mem get <id>
 
 ## 二、蒸馏对话为知识（v2 四轮协议）
 
-> **蒸馏前必读 `domain/DISTILL.md`**（领域蒸馏判断指南：R1 定位三选一与坐标选择、R3 正文写作规范）。
+> **蒸馏前必读两篇**：`source/SOURCE.md`（S0 素材准备：五种输入通道 + 确认闸门 + 素材纪律）→ `domain/DISTILL.md`（R1 定位三选一与坐标选择、R3 正文写作规范）。
 > 本期只做领域蒸馏（mode=domain）；事件蒸馏另立专题（`event/`，未实现）。
 > 旧版蒸馏规范已归档至 `_archive/`（v1 单轮批处理范式，仅历史参考，勿遵循）。
 
@@ -67,5 +67,7 @@ mem get <id>
 配套命令：
 
 ```
-mem anchor <jsonl_path>   # 建锚点：jsonl → data/anchors/s-*.md（缺路径时自动取最新会话）
+mem anchor <路径|URL>            # S0+S1：素材（jsonl/md/html/URL）→ 锚点（先 --preview 核对再落库）
+mem anchor --text "描述"         # 对话里直接贴的描述 → 单轮锚点
+mem anchor <输入> --preview      # 确认闸门：只渲染素材确认视图，不落库
 ```

@@ -19,7 +19,10 @@ from ..domain.models import (
     ROOT_PLACEHOLDER,
     DistillDriver,
     DistillPlan,
+    EdgeType,
     PlanAction,
+    Status,
+    parse_axis_placeholder,
 )
 
 
@@ -94,13 +97,13 @@ def _item_anchor_exists(plan: DistillPlan, ctx: CheckContext) -> list[CheckIssue
 
 
 def _edit_target_exists(plan: DistillPlan, ctx: CheckContext) -> list[CheckIssue]:
-    """edit 项的 edit_id 必填且指向存在的节点。"""
+    """edit/move 项的 edit_id 必填且指向存在的节点。"""
     issues = []
     for i, item in enumerate(plan.items):
-        if item.action is not PlanAction.EDIT:
+        if item.action not in (PlanAction.EDIT, PlanAction.MOVE):
             continue
         if not item.edit_id:
-            issues.append(_err("edit_target", "edit 项缺 edit_id", i))
+            issues.append(_err("edit_target", f"{item.action.value} 项缺 edit_id", i))
         elif ctx.index.get_node(item.edit_id) is None:
             issues.append(_err("edit_target",
                                f"edit_id 指向不存在的节点: {item.edit_id}", i))
@@ -108,20 +111,27 @@ def _edit_target_exists(plan: DistillPlan, ctx: CheckContext) -> list[CheckIssue
 
 
 def _parent_valid(plan: DistillPlan, ctx: CheckContext) -> list[CheckIssue]:
-    """create 项的 parent 必填且合法：存在的节点，或 "$ROOT"（仅新建领域根时可用）。"""
+    """create/move 项的 parent 必填且合法：存在的节点、$ROOT（仅新建领域根时可用）
+    或 $AXIS:<轴>（占位专查归 _axis_placeholder）。move 不许 $ROOT。"""
     issues = []
     root_create = plan.domain_root.action == "create"
     for i, item in enumerate(plan.items):
-        if item.action is not PlanAction.CREATE:
+        if item.action not in (PlanAction.CREATE, PlanAction.MOVE):
             continue
         if not item.parent:
             issues.append(_err("parent_valid",
-                               "create 项缺 parent（领域树节点必须挂靠坐标）", i))
+                               f"{item.action.value} 项缺 parent（领域树节点必须挂靠坐标）", i))
         elif item.parent == ROOT_PLACEHOLDER:
-            if not root_create:
+            if item.action is PlanAction.MOVE:
+                issues.append(_err("parent_valid",
+                                   "move 的 parent 不允许 $ROOT"
+                                   "（目标应为轴节点或已有节点）", i))
+            elif not root_create:
                 issues.append(_err(
                     "parent_valid",
                     f"parent={ROOT_PLACEHOLDER} 但 domain_root.action 不是 create", i))
+        elif parse_axis_placeholder(item.parent) is not None:
+            continue  # $AXIS 占位由 _axis_placeholder 规则专查
         elif ctx.index.get_node(item.parent) is None:
             issues.append(_err("parent_valid",
                                f"parent 指向不存在的节点: {item.parent}", i))
@@ -151,17 +161,17 @@ def _turns_annotated(plan: DistillPlan, ctx: CheckContext) -> list[CheckIssue]:
 
 
 def _elaborated_title(plan: DistillPlan, ctx: CheckContext) -> list[CheckIssue]:
-    """非 skip 项 title 必填——title 是 R1 定位产物（树节点的名字），不是 R3 正文。"""
+    """非 skip/move 项 title 必填——title 是 R1 定位产物（树节点的名字），不是 R3 正文。"""
     return [_err("elaborated_title", "缺 title（R1 定位不完整）", i)
             for i, item in enumerate(plan.items)
-            if item.action is not PlanAction.SKIP and not item.title]
+            if item.action in (PlanAction.CREATE, PlanAction.EDIT) and not item.title]
 
 
 def _elaborated_body(plan: DistillPlan, ctx: CheckContext) -> list[CheckIssue]:
-    """R3 完成度：非 skip 项应有 summary/body（空缺给警告）。"""
+    """R3 完成度：非 skip/move 项应有 summary/body（空缺给警告）。"""
     issues = []
     for i, item in enumerate(plan.items):
-        if item.action is PlanAction.SKIP:
+        if item.action in (PlanAction.SKIP, PlanAction.MOVE):
             continue
         if not item.summary:
             issues.append(_warn("elaborated_body", "缺 summary", i))
@@ -205,12 +215,17 @@ def _domain_root_valid(plan: DistillPlan, ctx: CheckContext) -> list[CheckIssue]
 
 
 def _aspect_vocabulary(plan: DistillPlan, ctx: CheckContext) -> list[CheckIssue]:
-    """create/edit 项的 aspect 必填且在值域内（值域空 = 未配置，跳过）。"""
+    """create/edit 项 aspect 必填且在值域内；move 项不强制（跨轴移动时才带），
+    带了就校验值域（值域空 = 未配置，跳过）。"""
     if not ctx.aspects:
         return []
     issues = []
     for i, item in enumerate(plan.items):
-        if item.action is PlanAction.SKIP:
+        if item.action in (PlanAction.SKIP, PlanAction.MOVE):
+            if item.action is PlanAction.MOVE and item.aspect \
+                    and item.aspect not in ctx.aspects:
+                issues.append(_err("aspect_vocabulary",
+                                   f"aspect {item.aspect!r} 不在值域 {ctx.aspects}", i))
             continue
         if not item.aspect:
             issues.append(_err("aspect_vocabulary",
@@ -232,18 +247,107 @@ def _duplicate_title(plan: DistillPlan, ctx: CheckContext) -> list[CheckIssue]:
 
 
 def _aspect_chain(plan: DistillPlan, ctx: CheckContext) -> list[CheckIssue]:
-    """警告：create 项 aspect 与父节点 aspect 不一致（坐标纠错）。"""
+    """警告：create/move 项 aspect 与父节点不一致（坐标纠错；$AXIS 占位归专查规则）。"""
     issues = []
     for i, item in enumerate(plan.items):
-        if item.action is not PlanAction.CREATE or not item.aspect:
+        if item.action not in (PlanAction.CREATE, PlanAction.MOVE) or not item.aspect:
             continue
-        if not item.parent or item.parent == ROOT_PLACEHOLDER:
-            continue  # 根的第一层切面：无父链可比
+        if not item.parent or item.parent == ROOT_PLACEHOLDER \
+                or parse_axis_placeholder(item.parent) is not None:
+            continue  # 根的第一层切面 / 轴占位：无父链可比或归 _axis_placeholder
         parent = ctx.truth.get_knowledge(item.parent)
         if parent is not None and parent.aspect and parent.aspect != item.aspect:
             issues.append(_warn("aspect_chain",
                                 f"aspect={item.aspect} 与父节点 {item.parent} 的 "
                                 f"aspect={parent.aspect} 不一致", i))
+    return issues
+
+
+# ==================== 轴占位 / move 专属规则 ====================
+
+
+def _axis_placeholder(plan: DistillPlan, ctx: CheckContext) -> list[CheckIssue]:
+    """$AXIS:<轴> 占位合法性（error）：①与 item.aspect 一致；②不悬空
+    （同计划建该轴节点，或库中已存在——existing 根可查库）。"""
+    issues = []
+    for i, item in enumerate(plan.items):
+        if item.action not in (PlanAction.CREATE, PlanAction.MOVE):
+            continue
+        axis = parse_axis_placeholder(item.parent)
+        if axis is None:
+            continue
+        if item.aspect and item.aspect != axis:
+            issues.append(_err("axis_placeholder",
+                               f"parent=$AXIS:{axis} 与 aspect={item.aspect} 不一致", i))
+        planned = any(a.action is PlanAction.CREATE
+                      and a.parent == ROOT_PLACEHOLDER
+                      and a.aspect == axis for a in plan.items)
+        exists = (not planned
+                  and plan.domain_root.action == "existing"
+                  and _axis_in_library(ctx, plan.domain_root.id, axis))
+        if not planned and not exists:
+            issues.append(_err("axis_placeholder",
+                               f"$AXIS:{axis} 悬空：计划未建该轴节点且库中不存在", i))
+    return issues
+
+
+def _axis_in_library(ctx: CheckContext, root_id: str, axis: str) -> bool:
+    """库中该轴节点已存在：parent=根 + aspect=轴 + 非 deprecated。"""
+    for from_id, to_id, et in ctx.index.get_all_edges():
+        if et == EdgeType.PARENT.value and to_id == root_id:
+            node = ctx.index.get_node(from_id)
+            if (node is not None and node.aspect == axis
+                    and node.status != Status.DEPRECATED.value):
+                return True
+    return False
+
+
+def _leaf_direct_on_root(plan: DistillPlan, ctx: CheckContext) -> list[CheckIssue]:
+    """警告：aspect 非空的 create/move 项直接挂根——疑似叶子平铺，应挂 $AXIS:<轴>。
+
+    豁免（新根场景）：挂根项的 aspect 被本计划 $AXIS:<轴> 引用 = 它是在建的轴节点
+    （否则 $AXIS 悬空会被 _axis_placeholder 拦截，不可能漏判为轴）。
+    existing 根场景：轴已在库中，挂根项一律视为平铺（轴节点不会重复建）。
+    """
+    root_id = plan.domain_root.id if plan.domain_root.action == "existing" else ""
+    axes_referenced = {parse_axis_placeholder(a.parent)
+                       for a in plan.items
+                       if a.action in (PlanAction.CREATE, PlanAction.MOVE)}
+    axes_referenced.discard(None)
+    issues = []
+    for i, item in enumerate(plan.items):
+        if item.action not in (PlanAction.CREATE, PlanAction.MOVE) or not item.aspect:
+            continue
+        on_root = (item.parent == ROOT_PLACEHOLDER
+                   or (root_id and item.parent == root_id))
+        if not on_root:
+            continue
+        if plan.domain_root.action == "create" \
+                and item.aspect in axes_referenced:
+            continue  # 在建轴节点：合法
+        issues.append(_warn("leaf_direct_on_root",
+                            f"aspect={item.aspect} 的项直接挂根：疑似叶子平铺，"
+                            f"应挂 $AXIS:{item.aspect}", i))
+    return issues
+
+
+def _move_no_cycle(plan: DistillPlan, ctx: CheckContext) -> list[CheckIssue]:
+    """move 成环检查（error）：新 parent 的上游路径经过被挪节点自身即环。
+    仅查非占位 parent（$AXIS 占位解析后由 confirm 的 _apply_move 兜底）。"""
+    issues = []
+    for i, item in enumerate(plan.items):
+        if item.action is not PlanAction.MOVE:
+            continue
+        if parse_axis_placeholder(item.parent) is not None:
+            continue
+        cursor = ctx.truth.get_knowledge(item.parent)
+        while cursor is not None:
+            if cursor.id == item.edit_id:
+                issues.append(_err("move_no_cycle",
+                                   f"move 成环：{item.parent} 位于 {item.edit_id} 的子树下", i))
+                break
+            cursor = (ctx.truth.get_knowledge(cursor.parents[0])
+                      if cursor.parents else None)
     return issues
 
 
@@ -263,6 +367,9 @@ RULES: list[tuple[frozenset, str, Rule]] = [
     (frozenset({"domain"}), "draft", _aspect_vocabulary),
     (frozenset({"domain"}), "draft", _duplicate_title),
     (frozenset({"domain"}), "draft", _aspect_chain),
+    (frozenset({"domain"}), "draft", _axis_placeholder),
+    (frozenset({"domain"}), "draft", _leaf_direct_on_root),
+    (frozenset({"domain", "event"}), "draft", _move_no_cycle),
 ]
 
 

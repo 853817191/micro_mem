@@ -119,6 +119,25 @@ class TruthStore(ABC):
         """取全部计划（审计 / 反馈回路统计用）。"""
 
 
+class SourceParser(ABC):
+    """素材解析端口（S0）：任意输入格式 → 统一 turn 序列。
+
+    蒸馏协议的唯一入口。每种输入格式一个实现（jsonl/md/html/url…），
+    输出统一 [(轮次号, 轮内文本)]：轮次号从 1 连续；轮内文本含 role 段落头
+    （文档类输入整轮标 "## user"）。turn 序列由 anchor_format 唯一序列化成
+    锚点正文——parser 不拼格式、不碰存储。
+    零轮（空素材）由实现返回 []，调用方拒收。
+    """
+
+    @abstractmethod
+    def supports(self, source: str) -> bool:
+        """该 source（文件路径或 URL）是否归本解析器处理。"""
+
+    @abstractmethod
+    def parse_turns(self, source: str) -> list[tuple[int, str]]:
+        """解析为 turn 序列；解析失败抛 ValueError（带格式上下文）。"""
+
+
 class IndexStore(ABC):
     """索引端口：检索/图/向量的存取。
 

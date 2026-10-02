@@ -24,8 +24,13 @@ from ..application.plan_checker import (
     PlanRejectedError,
     check_plan,
 )
-from ..application.ports import IndexStore, TruthStore
+from ..application.ports import IndexStore, SourceParser, TruthStore
 from ..application.search_service import SearchService
+from ..domain.anchor_format import (
+    parse_turns as parse_anchor_turns,
+    serialize_turns,
+    wrap_turn,
+)
 from ..domain.models import (
     ROOT_PLACEHOLDER,
     Anchor,
@@ -42,8 +47,8 @@ from ..domain.models import (
     Source,
     SourceType,
     Status,
+    parse_axis_placeholder,
 )
-from ..infrastructure import claude_jsonl
 
 
 @dataclass
@@ -90,10 +95,12 @@ class DistillService:
     def __init__(self, truth: TruthStore, index: IndexStore,
                  knowledge: KnowledgeService, search: SearchService | None = None,
                  aspects: list[str] | None = None,
-                 view_config: dict[str, int] | None = None):
+                 view_config: dict[str, int] | None = None,
+                 parsers: list[SourceParser] | None = None):
         """依赖注入：端口 + 协作服务 + 切面值域 + R1 视图预算（config 注入）。
 
         search 为 None 时跳过预检索供给（退化回纯轮次输出，便于测试隔离）。
+        parsers 为 S0 素材解析注册表（有序探测）；空列表时 anchor 拒收一切输入。
         """
         self._truth = truth
         self._index = index
@@ -101,31 +108,70 @@ class DistillService:
         self._search = search
         self._aspects = list(aspects or [])
         self._view = {**distill_view.DEFAULTS, **(view_config or {})}
+        self._parsers = list(parsers or [])
 
-    # ================= 一段：锚点 =================
+    # ================= 一段：锚点（S0+S1：解析 → 确认闸门在 CLI） =================
 
-    def anchor(self, jsonl_path: str, title: str = "") -> str:
-        """会话 jsonl → 保真锚点。返回 anchor_id（无对话内容返回空串）。"""
-        text = claude_jsonl.parse_session(jsonl_path)
-        if not text:
+    def anchor(self, source: str, title: str = "") -> str:
+        """任意素材（文件路径 / URL）→ 保真锚点。返回 anchor_id（零轮返回空串）。
+
+        S0 解析：按注册表顺序探测 parser；turn 序列经 anchor_format 唯一序列化。
+        """
+        parser = self._pick_parser(source)
+        turns = parser.parse_turns(source)
+        if not turns:
             return ""
+        return self._save_turns(turns, title or self._default_title(source), source)
+
+    def anchor_text(self, text: str, title: str = "") -> str:
+        """对话中直接给的一段描述（--text 通道）：整段 = 1 turn。
+
+        多段描述需要按段切轮时，写成 md 文件走 MarkdownParser（标题切轮）。
+        """
+        body = text.strip()
+        if not body:
+            return ""
+        turns = [(1, wrap_turn(body))]
+        return self._save_turns(turns, title or body[:20], "inline-text")
+
+    def preview_turns(self, source: str = "", text: str = "") -> list[tuple[int, str]]:
+        """确认闸门（S0 输出预览）：不落库，返回 turn 序列供渲染核对。"""
+        if text:
+            body = text.strip()
+            return [(1, wrap_turn(body))] if body else []
+        return self._pick_parser(source).parse_turns(source)
+
+    def _save_turns(self, turns: list[tuple[int, str]], title: str,
+                    source: str) -> str:
         return self._truth.save_anchor(Anchor(
-            id="", title=title or os.path.basename(jsonl_path), date="",
-            content=text, source=os.path.abspath(jsonl_path)))
+            id="", title=title, date="",
+            content=serialize_turns(turns), source=source))
+
+    def _pick_parser(self, source: str) -> SourceParser:
+        for parser in self._parsers:
+            if parser.supports(source):
+                return parser
+        raise ValueError(
+            f"不支持的素材格式: {source}"
+            "（支持: .jsonl / .md / .html / http(s):// URL；或 --text 直接输入文本）")
+
+    @staticmethod
+    def _default_title(source: str) -> str:
+        if source.startswith(("http://", "https://")):
+            return source.split("//", 1)[1].split("/")[0]
+        return os.path.basename(source)
 
     # ================= 二段：增量蒸馏准备 =================
 
     def prepare(self, anchor_id: str) -> DistillContext:
-        """增量蒸馏准备：重同步锚点 → 算增量 → 供给 R1 素材（视图 + 预检索子树）。"""
+        """增量蒸馏准备：读锚点 → 算增量 → 供给 R1 素材（视图 + 预检索子树）。"""
         anchor = self._truth.get_anchor(anchor_id)
         if anchor is None:
             raise KeyError(f"锚点不存在: {anchor_id}")
-        if not anchor.source or not os.path.exists(anchor.source):
-            raise ValueError(f"锚点 {anchor_id} 无有效 jsonl 源（{anchor.source or '空'}），"
-                             "无法做增量蒸馏")
-        text = claude_jsonl.parse_session(anchor.source)
-        turns = claude_jsonl.parse_turns(anchor.source)
-        self._truth.resync_anchor(anchor_id, text)
+        # 锚点自足（D3）：turn 切分只认锚点正文（anchor_format 唯一读方），
+        # 不回读源文件——源只是 S0 的输入，S1 落盘后生命周期结束。
+        text = anchor.content
+        turns = parse_anchor_turns(text)
         cursor = self._truth.get_distill_cursor(anchor_id)
         delta = [(i, t) for i, t in turns if i > cursor]
         processed_until = max((i for i, _ in delta), default=cursor)
@@ -264,15 +310,15 @@ class DistillService:
     def _expected_turns(self, plan: DistillPlan) -> list[int]:
         """本次增量的轮次全集（session 驱动）：游标之后到最新轮次。
 
-        轮次覆盖校验的基线；锚点无有效 jsonl 源时无基线（返回空，校验跳过）。
+        轮次覆盖校验的基线；锚点自足，切轮只认锚点正文。
         """
         if plan.driver is not DistillDriver.SESSION or not plan.anchor:
             return []
         anchor = self._truth.get_anchor(plan.anchor)
-        if anchor is None or not anchor.source or not os.path.exists(anchor.source):
+        if anchor is None:
             return []
         cursor = self._truth.get_distill_cursor(plan.anchor)
-        return [i for i, _ in claude_jsonl.parse_turns(anchor.source) if i > cursor]
+        return [i for i, _ in parse_anchor_turns(anchor.content) if i > cursor]
 
     # ================= 四段：确认落库（R4） =================
 
@@ -299,18 +345,34 @@ class DistillService:
         result = ConfirmResult(plan_id=plan_id,
                                warnings=[i.format() for i in warnings])
         root_id = self._resolve_root(plan, result)
+        axis_map = self._resolve_axis_map(root_id)
+        # 三段式落库：先轴节点（parent=$ROOT 的 create 项，登记 axis_map）
+        # → 再其余 create 项（解析 $AXIS 占位）→ 最后 edit/move（move 依赖轴节点已落）
         for item in plan.items:
             if item.action is PlanAction.SKIP:
                 item.result = ItemResult.SKIPPED
                 result.skipped += 1
-                continue
-            if item.action is PlanAction.CREATE:
+            elif (item.action is PlanAction.CREATE
+                    and item.parent == ROOT_PLACEHOLDER):
                 kid = self._create_item(item, root_id)
+                if item.aspect:
+                    axis_map.setdefault(item.aspect, kid)
                 item.result, item.result_knowledge_id = ItemResult.CREATED, kid
                 result.created_ids.append(kid)
-            else:
+        for item in plan.items:
+            if item.action is not PlanAction.CREATE or item.parent == ROOT_PLACEHOLDER:
+                continue
+            kid = self._create_item(item, root_id, axis_map)
+            item.result, item.result_knowledge_id = ItemResult.CREATED, kid
+            result.created_ids.append(kid)
+        for item in plan.items:
+            if item.action is PlanAction.EDIT:
                 self._apply_edit(item)
                 item.result, item.result_knowledge_id = ItemResult.EDITED, item.edit_id
+                result.edited_ids.append(item.edit_id)
+            elif item.action is PlanAction.MOVE:
+                self._apply_move(item, axis_map)
+                item.result, item.result_knowledge_id = ItemResult.MOVED, item.edit_id
                 result.edited_ids.append(item.edit_id)
 
         # 游标推进：max(items 覆盖的轮次)；skip 项同样计入（明确不蒸 = 已决策）
@@ -339,9 +401,10 @@ class DistillService:
         result.created_ids.append(kid)
         return kid
 
-    def _create_item(self, item: PlanItem, root_id: str) -> str:
-        """create 项落库：领域树节点（model/domain），$ROOT 占位替换为实际根 id。"""
-        parent = root_id if item.parent == ROOT_PLACEHOLDER else item.parent
+    def _create_item(self, item: PlanItem, root_id: str,
+                     axis_map: dict[str, str] | None = None) -> str:
+        """create 项落库：领域树节点（model/domain），$ROOT/$AXIS 占位替换为实际 id。"""
+        parent = self._resolve_parent(item.parent, root_id, axis_map or {})
         return self._knowledge.create(Knowledge(
             type=KnowledgeType.MODEL, scope=Scope.DOMAIN,
             title=item.title, summary=item.summary, body=item.body,
@@ -349,6 +412,56 @@ class DistillService:
             sources=[Source(SourceType.CONVERSATION_DISTILLED,
                             item.source_anchor, sorted(item.source_turns))],
             parents=[parent]))
+
+    def _resolve_axis_map(self, root_id: str) -> dict[str, str]:
+        """库中已有轴节点（existing 根场景）：parent=根 + aspect=X + 非 deprecated。"""
+        children: dict[str, list[str]] = {}
+        for from_id, to_id, et in self._index.get_all_edges():
+            if et == EdgeType.PARENT.value:
+                children.setdefault(to_id, []).append(from_id)
+        axis_map: dict[str, str] = {}
+        for child_id in children.get(root_id, []):
+            node = self._index.get_node(child_id)
+            if (node is not None and node.aspect
+                    and node.status != Status.DEPRECATED.value):
+                axis_map.setdefault(node.aspect, child_id)
+        return axis_map
+
+    @staticmethod
+    def _resolve_parent(parent: str, root_id: str,
+                        axis_map: dict[str, str]) -> str:
+        """parent 占位符解析：$ROOT → 根 id；$AXIS:<轴> → 轴节点 id（须在 axis_map）。"""
+        if parent == ROOT_PLACEHOLDER:
+            return root_id
+        axis = parse_axis_placeholder(parent)
+        if axis is not None:
+            if axis not in axis_map:
+                raise ValueError(f"轴节点不可用: $AXIS:{axis}"
+                                 f"（计划未建该轴且库中不存在）")
+            return axis_map[axis]
+        return parent
+
+    def _apply_move(self, item: PlanItem, axis_map: dict[str, str]) -> None:
+        """move 落库：挪 parents 坐标（title/summary/body 不动），可带 aspect 跨轴换轴。
+
+        成环防御：沿新 parent 向上遍历，路径经过被挪节点自身即拒
+        （draft 阶段 checker 已对非占位 parent 做过同款检查，这里兜底占位解析后的）。
+        """
+        k = self._truth.get_knowledge(item.edit_id)
+        assert k is not None  # 校验已保证 edit_id 存在
+        if item.parent == ROOT_PLACEHOLDER:
+            raise ValueError("move 的 parent 不允许 $ROOT（挪到根下无意义，目标应为轴节点）")
+        new_parent = self._resolve_parent(item.parent, "", axis_map)
+        cursor = self._truth.get_knowledge(new_parent)
+        while cursor is not None:
+            if cursor.id == item.edit_id:
+                raise ValueError(f"move 成环: {item.edit_id} 不能挂到自己的子孙下")
+            cursor = (self._truth.get_knowledge(cursor.parents[0])
+                      if cursor.parents else None)
+        sources = self._merge_sources(k.sources, item.source_anchor,
+                                      item.source_turns)
+        self._knowledge.update(item.edit_id, parents=[new_parent],
+                               aspect=item.aspect or None, sources=sources)
 
     def _apply_edit(self, item: PlanItem) -> None:
         """edit 落库：title/summary/body/aspect 全量替换 + 溯源累积合并。

@@ -1,0 +1,53 @@
+{
+  "driver": "session",
+  "mode": "domain",
+  "domain_root": {
+    "action": "create",
+    "title": "国际机票需求单",
+    "gist": "新建领域根：国际机票需求单从创建、供应商报价、选择方案、审批到补录出票的完整业务领域"
+  },
+  "anchor": "s-20261002-001",
+  "items": [
+    {"action": "create", "aspect": "flow", "parent": "$ROOT",
+     "title": "流程", "gist": "建流程轴节点：需求单从创建到出票各环节的流转步骤与接口编排",
+     "source": {"anchor": "s-20261002-001", "turns": [1, 3, 4, 5]}},
+    {"action": "create", "aspect": "constraint", "parent": "$ROOT",
+     "title": "约束", "gist": "建约束轴节点：需求单状态流转须遵守的业务规则与触发条件",
+     "source": {"anchor": "s-20261002-001", "turns": [5]}},
+    {"action": "create", "aspect": "boundary", "parent": "$ROOT",
+     "title": "边界", "gist": "建边界轴节点：与外部系统（审批系统、订单服务）的交互入口与契约",
+     "source": {"anchor": "s-20261002-001", "turns": [5]}},
+
+    {"action": "create", "aspect": "flow", "parent": "$AXIS:flow",
+     "title": "国际机票需求单创建流程", "gist": "C端（app/h5/pc）创建页填必填项后保存或提交：保存与提交共用 createOrUpdate，提交前前置校验 checkUserCard；页面初始化及出差申请/城市/乘机人/差标等外部数据查询在创建页内完成",
+     "source": {"anchor": "s-20261002-001", "turns": [1]}},
+    {"action": "create", "aspect": "flow", "parent": "$AXIS:flow",
+     "title": "国际机票需求单供应商手动报价流程", "gist": "供应商端页面报价闭环：查询需求单列表 listForSupplier → 详情 detailForSupplierNew → 删除 del / 拒绝报价 refuse / 填写并提交报价 submitPrice，一个需求单可多个供应商参与报价",
+     "source": {"anchor": "s-20261002-001", "turns": [3]}},
+    {"action": "create", "aspect": "flow", "parent": "$AXIS:flow",
+     "title": "国际机票需求单供应商自动报价流程", "gist": "自动报价链路：创建需求单时向支持自动报价的供应商推送报价通知，供应商系统处理报价数据后回调自动报价接口 autoSubmitPrice 完成报价",
+     "source": {"anchor": "s-20261002-001", "turns": [4]}},
+    {"action": "create", "aspect": "flow", "parent": "$AXIS:flow",
+     "title": "国际机票需求单报价超时自动取消流程", "gist": "job 扫描 time_limit 报价截止字段：到期后按报价情况更新需求单状态；有报价、过截止且单被更新为待处理时用户才可选择方案，与选择方案流程紧密相连",
+     "source": {"anchor": "s-20261002-001", "turns": [5]}},
+    {"action": "create", "aspect": "flow", "parent": "$AXIS:flow",
+     "title": "国际机票需求单选择方案流程", "gist": "用户端操作链：需求单列表 list → 详情 detailDemandMultiple → 可取消需求单 cancelDemand → 确认方案前校验 checkQuote → 选定方案 selectQuoteNew 进入下一阶段",
+     "source": {"anchor": "s-20261002-001", "turns": [5]}},
+    {"action": "create", "aspect": "flow", "parent": "$AXIS:flow",
+     "title": "国际机票需求单补录出票流程", "gist": "供应商端出票：查询列表/详情后，出票失败走 ticketFail；补录出票即转订单——先调订单服务校验（checkSupplierOrderInfo、checkRepeatAddOrder、demand validate）再调补录接口落单，回写子单 fio_demand_sub.order_id",
+     "source": {"anchor": "s-20261002-001", "turns": [5]}},
+
+    {"action": "create", "aspect": "constraint", "parent": "$AXIS:constraint",
+     "title": "国际机票需求单方案选择触发条件", "gist": "两条件任一满足即可选择方案：①报价截止时间 time_limit 到期；②参与报价的供应商超过 N 家",
+     "source": {"anchor": "s-20261002-001", "turns": [5]}},
+
+    {"action": "create", "aspect": "boundary", "parent": "$AXIS:boundary",
+     "title": "国际机票需求单审批结果接收", "gist": "审批在外部审批系统 approval_system 完成（查看详情/通过/拒绝），结果经消息回传；国际机票侧接收入口 ApprovalResultProcessService#processApprovalResult，共 3 个调用入口（2 个消息 + 1 个 Controller，Controller 入口已废弃）",
+     "source": {"anchor": "s-20261002-001", "turns": [5]}},
+
+    {"action": "skip", "gist": "turn 2 为读代码的过程指令轮（限定只关注国际机票服务内接口、外部接口不深挖），无领域知识",
+     "source": {"anchor": "s-20261002-001", "turns": [2]}},
+    {"action": "skip", "gist": "turn 6 为蒸馏任务发起轮（给项目地址、发起领域蒸馏），非领域知识",
+     "source": {"anchor": "s-20261002-001", "turns": [6]}}
+  ]
+}
