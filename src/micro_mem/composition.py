@@ -16,6 +16,7 @@ from .application.knowledge_service import KnowledgeService
 from .application.ports import Embedder, IndexStore, TruthStore
 from .application.rebuild_service import RebuildService
 from .application.search_service import SearchService
+from .domain.axis_templates import DEFAULT_TEMPLATES
 from .infrastructure.config import Config
 from .infrastructure.hash_embedder import HashEmbedder
 from .infrastructure.markdown_truth import MarkdownTruthStore
@@ -43,16 +44,20 @@ def _wire(truth: TruthStore, index: IndexStore, embedder: Embedder,
           semantic_fallback: str = "on_zero_hit",
           aspects: list[str] | None = None,
           view_config: dict[str, int] | None = None,
+          templates: dict[str, dict[str, str]] | None = None,
           config: Config | None = None) -> Components:
     """端口 → 服务的共享接线（生产与内存装配同一拓扑）。"""
     knowledge = KnowledgeService(truth, index, embedder)
     search = SearchService(truth, index, embedder, semantic_fallback)
+    # templates=None → 内置默认模板（与生产 Config 默认值同行为）
     return Components(
         truth=truth, index=index, embedder=embedder,
         knowledge=knowledge, search=search,
         distill=DistillService(truth, index, knowledge, search=search,
                                aspects=aspects, view_config=view_config,
-                               parsers=default_parsers()),
+                               parsers=default_parsers(),
+                               templates=(templates if templates is not None
+                                          else DEFAULT_TEMPLATES)),
         importer=ImportService(truth),
         rebuild=RebuildService(truth, index, embedder),
         config=config)
@@ -61,12 +66,14 @@ def _wire(truth: TruthStore, index: IndexStore, embedder: Embedder,
 def assemble_inmemory(embedder_dim: int = 1024,
                       semantic_fallback: str = "on_zero_hit",
                       aspects: list[str] | None = None,
-                      view_config: dict[str, int] | None = None) -> Components:
+                      view_config: dict[str, int] | None = None,
+                      templates: dict[str, dict[str, str]] | None = None
+                      ) -> Components:
     """内存装配：单测 / 演示用（不碰盘、不起 SQLite）。"""
     return _wire(InMemoryTruthStore(), InMemoryIndexStore(),
                  HashEmbedder(embedder_dim),
                  semantic_fallback=semantic_fallback, aspects=aspects,
-                 view_config=view_config)
+                 view_config=view_config, templates=templates)
 
 
 def assemble(config_path: str | None = None) -> Components:
@@ -86,4 +93,5 @@ def assemble(config_path: str | None = None) -> Components:
                  semantic_fallback=config.semantic_fallback,
                  aspects=config.distill_aspects,
                  view_config=config.distill_view,
+                 templates=config.distill_templates,
                  config=config)

@@ -31,6 +31,7 @@ from ..domain.anchor_format import (
     serialize_turns,
     wrap_turn,
 )
+from ..domain.axis_templates import resolve_template
 from ..domain.models import (
     ROOT_PLACEHOLDER,
     Anchor,
@@ -96,11 +97,14 @@ class DistillService:
                  knowledge: KnowledgeService, search: SearchService | None = None,
                  aspects: list[str] | None = None,
                  view_config: dict[str, int] | None = None,
-                 parsers: list[SourceParser] | None = None):
+                 parsers: list[SourceParser] | None = None,
+                 templates: dict[str, dict[str, str]] | None = None):
         """依赖注入：端口 + 协作服务 + 切面值域 + R1 视图预算（config 注入）。
 
         search 为 None 时跳过预检索供给（退化回纯轮次输出，便于测试隔离）。
         parsers 为 S0 素材解析注册表（有序探测）；空列表时 anchor 拒收一切输入。
+        templates 为轴模板（mode → {轴名: 筛子定义}）；None 时按模式取模板
+        一律落空、退化为空值域（跳过模板相关校验），测试注入建议显式传。
         """
         self._truth = truth
         self._index = index
@@ -109,6 +113,7 @@ class DistillService:
         self._aspects = list(aspects or [])
         self._view = {**distill_view.DEFAULTS, **(view_config or {})}
         self._parsers = list(parsers or [])
+        self._templates = dict(templates or {})
 
     # ================= 一段：锚点（S0+S1：解析 → 确认闸门在 CLI） =================
 
@@ -287,6 +292,12 @@ class DistillService:
             gaps.append(f"{undistilled} 个相关锚点游标为 -1（从未蒸馏）")
         return gaps
 
+    # ================= 轴模板（轴先行：R1 拿轴筛原文的底座定义） =================
+
+    def template_axes(self, mode: str) -> dict[str, str]:
+        """按模式解析轴模板（无配置或空 → 兜底默认模板），供校验与供给视图使用。"""
+        return resolve_template(self._templates, mode)
+
     # ================= 三段：计划提交（R2 批准动作） =================
 
     def submit_plan(self, plan: DistillPlan) -> tuple[DistillPlan, list[CheckIssue]]:
@@ -298,7 +309,8 @@ class DistillService:
         if plan.plan_id:
             raise ValueError(f"计划已有 plan_id（{plan.plan_id}），"
                              "修订请直接编辑归档文件，不要重复提交")
-        ctx = CheckContext(self._truth, self._index, self._aspects)
+        ctx = CheckContext(self._truth, self._index,
+                           list(self.template_axes(plan.mode.value).keys()))
         issues = check_plan(plan, ctx, stage="draft")
         errors = [i for i in issues if i.level == "error"]
         if errors:
@@ -334,7 +346,8 @@ class DistillService:
             raise KeyError(f"计划不存在: {plan_id}")
         if plan.status == "confirmed":
             raise ValueError(f"计划已落库，不得重复 confirm: {plan_id}")
-        ctx = CheckContext(self._truth, self._index, self._aspects)
+        ctx = CheckContext(self._truth, self._index,
+                           list(self.template_axes(plan.mode.value).keys()))
         issues = check_plan(plan, ctx, stage="final")
         errors = [i for i in issues if i.level == "error"]
         if errors:

@@ -57,7 +57,8 @@ class CheckContext:
     """校验规则的运行时依赖。"""
     truth: TruthStore
     index: IndexStore
-    aspects: list[str]       # 领域切面值域（空 = 未配置，跳过值域校验）
+    aspects: list[str]       # 值域 = 计划 mode 的模板轴名（DistillService 按
+                             # plan.mode 解析注入；空 = 未配置模板，跳过值域校验）
 
 
 def _err(rule: str, message: str, item_index: int = -1) -> CheckIssue:
@@ -247,6 +248,24 @@ def _duplicate_title(plan: DistillPlan, ctx: CheckContext) -> list[CheckIssue]:
             if item.action is PlanAction.CREATE and item.title and item.title in existing]
 
 
+def _template_axes_complete(plan: DistillPlan, ctx: CheckContext) -> list[CheckIssue]:
+    """轴先行底座完整性（warning）：create 根场景，模板轴未全部建出 → 提醒。
+
+    空轴也是底座（前期数据不全，后续流程补充），模板有的轴计划里就该有
+    （parent=$ROOT + aspect=轴 的 create 项）；值域空 = 未配置模板，跳过。
+    """
+    if not ctx.aspects or plan.domain_root.action != "create":
+        return []
+    planned = {a.aspect for a in plan.items
+               if a.action is PlanAction.CREATE
+               and a.parent == ROOT_PLACEHOLDER and a.aspect}
+    missing = [axis for axis in ctx.aspects if axis not in planned]
+    if missing:
+        return [_warn("template_axes_complete",
+                      f"轴模板未建齐: {missing}（轴先行：空轴也是底座，建议全部建出）")]
+    return []
+
+
 def _aspect_chain(plan: DistillPlan, ctx: CheckContext) -> list[CheckIssue]:
     """警告：create/move 项 aspect 与父节点不一致（坐标纠错；$AXIS 占位归专查规则）。"""
     issues = []
@@ -306,9 +325,9 @@ def _axis_in_library(ctx: CheckContext, root_id: str, axis: str) -> bool:
 def _leaf_direct_on_root(plan: DistillPlan, ctx: CheckContext) -> list[CheckIssue]:
     """警告：aspect 非空的 create/move 项直接挂根——疑似叶子平铺，应挂 $AXIS:<轴>。
 
-    豁免（新根场景）：挂根项的 aspect 被本计划 $AXIS:<轴> 引用 = 它是在建的轴节点
-    （否则 $AXIS 悬空会被 _axis_placeholder 拦截，不可能漏判为轴）。
-    existing 根场景：轴已在库中，挂根项一律视为平铺（轴节点不会重复建）。
+    豁免（新根场景）：挂根项是模板轴本身（轴先行：首层即轴，含无引用的空轴），
+    或被本计划 $AXIS:<轴> 引用（在建轴节点，否则 $AXIS 悬空会被
+    _axis_placeholder 拦截）。existing 根场景：轴已在库中，挂根项一律视为平铺。
     """
     root_id = plan.domain_root.id if plan.domain_root.action == "existing" else ""
     axes_referenced = {parse_axis_placeholder(a.parent)
@@ -323,9 +342,10 @@ def _leaf_direct_on_root(plan: DistillPlan, ctx: CheckContext) -> list[CheckIssu
                    or (root_id and item.parent == root_id))
         if not on_root:
             continue
-        if plan.domain_root.action == "create" \
-                and item.aspect in axes_referenced:
-            continue  # 在建轴节点：合法
+        if plan.domain_root.action == "create" and (
+                item.aspect in axes_referenced
+                or (ctx.aspects and item.aspect in ctx.aspects)):
+            continue  # 在建轴节点（模板轴 / 被 $AXIS 引用）：合法
         issues.append(_warn("leaf_direct_on_root",
                             f"aspect={item.aspect} 的项直接挂根：疑似叶子平铺，"
                             f"应挂 $AXIS:{item.aspect}", i))
@@ -368,6 +388,7 @@ RULES: list[tuple[frozenset, str, Rule]] = [
     (frozenset({"domain"}), "draft", _aspect_vocabulary),
     (frozenset({"domain"}), "draft", _duplicate_title),
     (frozenset({"domain"}), "draft", _aspect_chain),
+    (frozenset({"domain", "event"}), "draft", _template_axes_complete),
     (frozenset({"domain"}), "draft", _axis_placeholder),
     (frozenset({"domain"}), "draft", _leaf_direct_on_root),
     (frozenset({"domain", "event"}), "draft", _move_no_cycle),

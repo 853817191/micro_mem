@@ -25,7 +25,15 @@ import sys
 from ..application.distill_service import DistillService
 from ..application.plan_checker import PlanRejectedError
 from ..composition import Components, assemble
-from ..domain.models import DistillPlan, Knowledge, KnowledgeType, Scope, Source, SourceType
+from ..domain.models import (
+    DistillPlan,
+    Knowledge,
+    KnowledgeType,
+    Scope,
+    Source,
+    SourceType,
+    validate_plan_dict,
+)
 
 # Windows 下强制 UTF-8 输出，避免管道/控制台中文乱码
 if hasattr(sys.stdout, "reconfigure"):
@@ -235,6 +243,14 @@ def cmd_distill(args, ctx: Components) -> None:
     print(f"锚点: {anchor_id} | 已蒸馏到 turn {dctx.distilled_until} | "
           f"本轮增量 turn {first_delta}..{dctx.processed_until}")
     print("=" * 70)
+    axes = ctx.distill.template_axes("domain")
+    print("【轴模板】（轴先行：拿轴去原文找内容；找不到的轴也建空轴=底座，"
+          "后续流程补充）:")
+    for axis, sieve in axes.items():
+        print(f"  ── {axis} ── {sieve}")
+    print("  （模式判定归 R1：稳定业务结构→domain 用上图；一次性具体经过→event，"
+          "事件轴待定，未配前兜底同上图；模板可配置扩展见 config distill.templates）")
+    print("=" * 70)
     if dctx.view_compressed:
         print("【增量轮次·压缩视图】（超预算触发压缩：tool_result 剥离、长文截断；"
               "定位据此，原文下钻见文末锚点文件）:")
@@ -317,11 +333,23 @@ def _print_rejected(e: PlanRejectedError) -> None:
 
 
 def cmd_plan(args, ctx: Components) -> None:
-    """plan：提交蒸馏计划（R2 批准动作）——校验 + 回填 expected_turns + 归档。"""
+    """plan：提交蒸馏计划（R2 批准动作）——结构校验 + 语义校验 + 回填 + 归档。"""
     try:
         with open(args.file, encoding="utf-8") as f:
-            plan = DistillPlan.from_dict(json.load(f))
-    except (OSError, json.JSONDecodeError, ValueError, KeyError) as e:
+            raw = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        print(f"计划文件读取失败: {e}")
+        raise SystemExit(1) from e
+    # 结构校验（白名单）：未知字段/系统字段混入/缺必填/枚举非法，挡在 from_dict 前
+    schema_errors = validate_plan_dict(raw)
+    if schema_errors:
+        print("计划文件结构校验未通过（未提交、未归档）：")
+        for err in schema_errors:
+            print(f"  {err}")
+        raise SystemExit(1)
+    try:
+        plan = DistillPlan.from_dict(raw)
+    except (ValueError, KeyError) as e:
         print(f"计划文件解析失败: {e}")
         raise SystemExit(1) from e
     try:

@@ -58,6 +58,23 @@ def test_semantic_fallback_configurable_and_validated(tmp_path):
         _ = Config(str(cfg)).semantic_fallback
 
 
+def test_distill_templates_default_and_overridable(tmp_path, monkeypatch):
+    """轴模板：默认内置 domain 四轴；用户 config.yaml 可新增模式/覆盖轴（浅合并）。"""
+    monkeypatch.delenv("MEMORY_HOME", raising=False)
+    monkeypatch.chdir(tmp_path)
+    c = Config()
+    assert list(c.distill_templates["domain"]) == [
+        "flow", "structure", "boundary", "constraint"]
+    assert c.distill_templates["event"] == {}
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(
+        "distill:\n  templates:\n    mechanism:\n      原理: 怎么实现——算法、数据结构\n",
+        encoding="utf-8")
+    c2 = Config(str(cfg))
+    assert c2.distill_templates["mechanism"] == {"原理": "怎么实现——算法、数据结构"}
+    assert "flow" in c2.distill_templates["domain"]   # 浅合并：默认模板未被整节覆盖
+
+
 def test_explicit_missing_config_raises(tmp_path):
     """显式路径不存在必须显式失败（静默用默认值会藏配置错误）。"""
     with pytest.raises(FileNotFoundError):

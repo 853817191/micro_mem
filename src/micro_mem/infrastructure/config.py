@@ -10,6 +10,7 @@ from typing import Any
 
 import yaml
 
+from ..domain.axis_templates import DEFAULT_TEMPLATES
 from ..domain.models import SEMANTIC_FALLBACKS
 
 # 包内默认配置（无 config.yaml 时兜底）
@@ -18,10 +19,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "data_dir": "./data",
     "embedding_dim": 1024,
     "search": {"semantic_fallback": "on_zero_hit"},
-    # distill 节：aspects=切面值域；其余为 R1 视图预算参数
-    # （与 application/distill_view.py 的 DEFAULTS 保持一致，改要同步）
+    # distill 节：aspects=切面值域（兼容保留）；templates=轴模板（mode→{轴:筛子定义}，
+    # 默认内置见 domain/axis_templates.py，用户配置可新增模式/覆盖轴）；
+    # 其余为 R1 视图预算参数（与 application/distill_view.py 的 DEFAULTS 保持一致，改要同步）
     "distill": {
         "aspects": ["flow", "structure", "boundary", "constraint"],
+        "templates": DEFAULT_TEMPLATES,
         "context_budget_chars": 100000,   # 增量总字符预算：超了才触发压缩
         "assistant_chars": 300,           # 压缩时 assistant 段保留字符数
         "tool_input_chars": 100,          # 压缩时 tool_use 入参保留字符数
@@ -105,8 +108,18 @@ class Config:
 
     @property
     def distill_aspects(self) -> list[str]:
-        """领域切面值域（蒸馏计划校验用；可扩展——加轴改配置不改代码）。"""
+        """领域切面值域（蒸馏计划校验用；可扩展——加轴改配置不改代码）。
+
+        兼容保留：新代码应走 distill_templates（按模式取模板）；本值域为
+        未配 templates 时的全局兜底。
+        """
         return list((self._data.get("distill") or {}).get("aspects") or [])
+
+    @property
+    def distill_templates(self) -> dict[str, dict[str, str]]:
+        """轴模板：内置默认 + 用户配置扩展/覆盖（模式级覆盖：同 mode 用户版优先）。"""
+        raw = (self._data.get("distill") or {}).get("templates") or {}
+        return {**DEFAULT_TEMPLATES, **raw}
 
     @property
     def distill_view(self) -> dict[str, int]:

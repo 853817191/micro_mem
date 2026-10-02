@@ -14,6 +14,7 @@ import pytest
 
 from micro_mem.application.plan_checker import PlanRejectedError
 from micro_mem.composition import assemble_inmemory
+from micro_mem.domain.axis_templates import DEFAULT_TEMPLATES
 from micro_mem.domain.models import (
     Anchor,
     DistillDriver,
@@ -36,8 +37,9 @@ from micro_mem.domain.models import (
 
 @pytest.fixture
 def comp():
-    """内存装配（带领域切面值域，贴近生产配置）。"""
-    return assemble_inmemory(aspects=["flow", "structure", "boundary", "constraint"])
+    """内存装配（带轴模板与切面值域，贴近生产配置）。"""
+    return assemble_inmemory(aspects=["flow", "structure", "boundary", "constraint"],
+                             templates=DEFAULT_TEMPLATES)
 
 
 def _mk(title="示例知识", **kw) -> Knowledge:
@@ -461,12 +463,15 @@ def test_confirm_creates_tree_with_root_placeholder(comp, tmp_path):
             _mk_item(anchor_id, parent="$ROOT", title="流程", aspect="flow"),
             _mk_item(anchor_id, parent="$AXIS:flow", title="创建流程",
                      aspect="flow"),
+            _mk_item(anchor_id, parent="$ROOT", title="结构", aspect="structure"),
+            _mk_item(anchor_id, parent="$ROOT", title="边界", aspect="boundary"),
+            _mk_item(anchor_id, parent="$ROOT", title="约束", aspect="constraint"),
             _mk_item(anchor_id, action=PlanAction.SKIP, gist="闲聊",
                      source_turns=[]),
         ]))
     _elaborate(comp, plan.plan_id)
     result = comp.distill.confirm_plan(plan.plan_id)
-    assert len(result.created_ids) == 3                  # 根 + 轴节点 + 叶子
+    assert len(result.created_ids) == 6                  # 根 + 4 轴 + 叶子
     root_id = result.created_ids[0]
     root = comp.search.get(root_id)
     assert root.title == "测试领域" and root.type is KnowledgeType.MODEL
@@ -475,7 +480,10 @@ def test_confirm_creates_tree_with_root_placeholder(comp, tmp_path):
     axis_node = comp.search.get(result.created_ids[1])
     assert axis_node.parents == [root_id]                # $ROOT → 实际 id
     assert axis_node.aspect == "flow"
-    leaf = comp.search.get(result.created_ids[2])
+    assert comp.search.get(result.created_ids[2]).aspect == "structure"
+    assert comp.search.get(result.created_ids[3]).aspect == "boundary"
+    assert comp.search.get(result.created_ids[4]).aspect == "constraint"
+    leaf = comp.search.get(result.created_ids[5])
     assert leaf.parents == [axis_node.id]                # $AXIS:flow → 轴节点 id
     assert leaf.aspect == "flow"
     assert leaf.sources[0].ref == anchor_id
@@ -490,11 +498,72 @@ def test_confirm_creates_tree_with_root_placeholder(comp, tmp_path):
     assert archived.items[0].result is ItemResult.CREATED
     assert archived.items[0].result_knowledge_id == result.created_ids[1]
     assert archived.items[1].result is ItemResult.CREATED
-    assert archived.items[1].result_knowledge_id == result.created_ids[2]
-    assert archived.items[2].result is ItemResult.SKIPPED
+    assert archived.items[1].result_knowledge_id == result.created_ids[5]  # 叶子最后落
+    assert archived.items[2].result is ItemResult.CREATED
+    assert archived.items[2].result_knowledge_id == result.created_ids[2]
+    assert archived.items[5].result is ItemResult.SKIPPED
     # 重复 confirm 拒绝
     with pytest.raises(ValueError, match="重复 confirm"):
         comp.distill.confirm_plan(plan.plan_id)
+
+
+# ==================== 轴模板（轴先行：拿轴筛原文，空轴=底座） ====================
+
+
+def test_template_axes_resolve_per_mode(comp):
+    """按模式解析模板：domain 四轴；event 未配 → 兜底 domain。"""
+    assert list(comp.distill.template_axes("domain")) == [
+        "flow", "structure", "boundary", "constraint"]
+    assert comp.distill.template_axes("event") == comp.distill.template_axes("domain")
+    assert comp.distill.template_axes("未知模式") == comp.distill.template_axes("domain")
+
+
+def test_template_axes_fall_back_to_builtin_when_empty(tmp_path):
+    """templates 显式清空 → 兜底内置 domain 默认（默认模板是底座）。"""
+    c = assemble_inmemory(templates={})
+    assert c.distill.template_axes("domain") == DEFAULT_TEMPLATES["domain"]
+
+
+def test_submit_plan_warns_on_missing_template_axes(comp, tmp_path):
+    """create 根场景只建部分模板轴 → warning 提醒建齐（不拒收；空轴也是底座）。"""
+    anchor_id = _anchor_for(comp, tmp_path)
+    plan, warnings = comp.distill.submit_plan(DistillPlan(
+        anchor=anchor_id,
+        domain_root=DomainRoot(action="create", title="测试领域"),
+        items=[
+            _mk_item(anchor_id, parent="$ROOT", title="流程", aspect="flow"),
+            _mk_item(anchor_id, action=PlanAction.SKIP, gist="闲聊",
+                     source_turns=[]),
+        ]))
+    hits = [w for w in warnings if w.rule == "template_axes_complete"]
+    assert len(hits) == 1
+    assert "structure" in hits[0].message and "boundary" in hits[0].message
+    assert plan.status == "approved"                     # warning 不拒收
+
+
+def test_submit_plan_existing_root_skips_template_axes_check(comp, tmp_path):
+    """existing 根场景：轴可能已在库中，底座完整性不查计划（防误报）。"""
+    anchor_id = _anchor_for(comp, tmp_path)
+    root = _mk_root(comp)
+    comp.knowledge.create(Knowledge(
+        type=KnowledgeType.MODEL, scope=Scope.DOMAIN, title="流程",
+        summary="轴", aspect="flow", parents=[root]))
+    plan, warnings = comp.distill.submit_plan(_mk_plan(anchor_id, [
+        _mk_item(anchor_id, parent="$AXIS:flow"),
+    ], root))
+    assert not [w for w in warnings if w.rule == "template_axes_complete"]
+    assert plan.status == "approved"
+
+
+def test_submit_plan_full_template_axes_no_warning(comp, tmp_path):
+    """四轴全建 → 底座完整性无警告（轴先行标准形态）。"""
+    anchor_id = _anchor_for(comp, tmp_path)
+    _, warnings = comp.distill.submit_plan(DistillPlan(
+        anchor=anchor_id,
+        domain_root=DomainRoot(action="create", title="测试领域"),
+        items=[_mk_item(anchor_id, parent="$ROOT", title=f"轴-{a}", aspect=a)
+               for a in ("flow", "structure", "boundary", "constraint")]))
+    assert not [w for w in warnings if w.rule == "template_axes_complete"]
 
 
 def test_confirm_resolves_axis_against_library(comp, tmp_path):

@@ -415,6 +415,86 @@ class DistillPlan:
             created_at=d.get("created_at", ""))
 
 
+# ==================== draft 计划 JSON 的 schema 结构校验 ====================
+# 背景：计划是 R1 手写的 JSON，from_dict 只取已知键——拼错字段名（如 aspects）
+# 会被静默忽略、拖到 checker 才以"缺 aspect"间接暴露，排查要回溯手写文件。
+# 白名单制校验把这类错误挡在读入时：未知字段/系统字段混入/缺必填/枚举非法
+# 一次性报全，精确到 items[i] 位置。只查"JSON 结构对不对"，语义对错
+#（坐标/值域/轮次覆盖）归 plan_checker，两层不互相替代。
+
+PLAN_DRAFT_FIELDS = frozenset({"driver", "mode", "domain_root", "anchor", "items"})
+PLAN_SYSTEM_FIELDS = frozenset({"plan_id", "expected_turns", "status", "created_at"})
+ITEM_FIELDS = frozenset({"action", "aspect", "parent", "title", "gist",
+                         "edit_id", "source"})
+SOURCE_FIELDS = frozenset({"anchor", "turns"})
+_ACTION_VALUES = {a.value for a in PlanAction}
+_DRIVER_VALUES = {d.value for d in DistillDriver}
+_MODE_VALUES = {m.value for m in DistillMode}
+
+
+def validate_plan_dict(d: object) -> list[str]:
+    """draft 计划 JSON 结构校验（白名单制）。返回错误列表（空 = 通过）。"""
+    errors: list[str] = []
+    if not isinstance(d, dict):
+        return ["计划文件顶层必须是 JSON 对象 {...}"]
+    for key in d:
+        if key in PLAN_SYSTEM_FIELDS:
+            errors.append(f"系统管理字段不允许出现在 draft: {key}"
+                          f"（由 mem plan 提交时分配/回填，请删除）")
+        elif key not in PLAN_DRAFT_FIELDS:
+            errors.append(f"未知字段: {key}（draft 仅允许: {sorted(PLAN_DRAFT_FIELDS)}）")
+    driver = d.get("driver", DistillDriver.SESSION.value)
+    if driver not in _DRIVER_VALUES:
+        errors.append(f"driver 非法: {driver!r}（可选: {sorted(_DRIVER_VALUES)}）")
+    mode = d.get("mode", DistillMode.DOMAIN.value)
+    if mode not in _MODE_VALUES:
+        errors.append(f"mode 非法: {mode!r}（可选: {sorted(_MODE_VALUES)}）")
+    if not isinstance(d.get("domain_root"), dict):
+        errors.append("缺 domain_root（或不是对象）："
+                      '{"action": "create|existing", ...}')
+    if driver == DistillDriver.SESSION.value and not d.get("anchor"):
+        errors.append("session 驱动的 draft 缺 anchor（素材锚点 id）")
+    items = d.get("items")
+    if not isinstance(items, list) or not items:
+        errors.append("items 必须是至少一条计划项的数组")
+        return errors
+    for i, item in enumerate(items):
+        where = f"items[{i}]"
+        if not isinstance(item, dict):
+            errors.append(f"{where} 必须是 JSON 对象")
+            continue
+        for key in item:
+            if key not in ITEM_FIELDS:
+                errors.append(f"{where} 未知字段: {key}"
+                              f"（仅允许: {sorted(ITEM_FIELDS)}）")
+        action = item.get("action")
+        if action is None:
+            errors.append(f"{where} 缺 action（create|edit|skip|move）")
+        elif action not in _ACTION_VALUES:
+            errors.append(f"{where} action 非法: {action!r}"
+                          f"（可选: {sorted(_ACTION_VALUES)}）")
+        source = item.get("source")
+        if not isinstance(source, dict):
+            errors.append(f"{where} 缺 source（或不是对象）："
+                          '{"anchor": "s-...", "turns": [n]}')
+        else:
+            for key in source:
+                if key not in SOURCE_FIELDS:
+                    errors.append(f"{where}.source 未知字段: {key}"
+                                  f"（仅允许: {sorted(SOURCE_FIELDS)}）")
+            if not source.get("anchor"):
+                errors.append(f"{where}.source 缺 anchor（素材锚点 id）")
+            turns = source.get("turns")
+            if turns is not None and (
+                    not isinstance(turns, list)
+                    or any(not isinstance(t, int) for t in turns)):
+                errors.append(f"{where}.source.turns 必须是轮次整数数组（如 [1, 3]）")
+        for key in ("aspect", "parent", "title", "gist", "edit_id"):
+            if key in item and not isinstance(item[key], str):
+                errors.append(f"{where}.{key} 必须是字符串")
+    return errors
+
+
 # ==================== 索引记录 / 检索候选 ====================
 
 

@@ -132,12 +132,14 @@ def test_anchor_distill_plan_confirm_flow(tmp_path, capsys):
     main(["distill", anchor_id], components=comp)
     out = capsys.readouterr().out
     assert f"锚点: {anchor_id} | 已蒸馏到 turn -1" in out
+    assert "【轴模板】" in out                                    # 轴先行：供给视图带筛子
+    assert "── flow ──" in out and "── constraint ──" in out
     assert f"source.anchor 填 {anchor_id}" in out
     assert "第2问" in out                                    # 增量轮次（预算内全量）
     assert "【相关已有子树（预检索）】" in out
     assert "无相关已有节点" in out                           # 空库零命中
     assert f"data/anchors/{anchor_id}.md" in out            # 下钻指引
-    # plan（提交 AI 手写的 draft）
+    # plan（提交 AI 手写的 draft；轴先行：四轴全建，空轴=底座随 delta 轮验证）
     plan_file = tmp_path / "plan.json"
     plan_file.write_text(json.dumps({
         "driver": "session", "mode": "domain",
@@ -153,6 +155,15 @@ def test_anchor_distill_plan_confirm_flow(tmp_path, capsys):
              "source": {"anchor": anchor_id, "turns": [1]}},
             {"action": "skip", "gist": "第2问是闲聊，无领域知识",
              "source": {"anchor": anchor_id, "turns": [2]}},
+            {"action": "create", "aspect": "structure", "parent": "$ROOT",
+             "title": "结构", "gist": "结构轴节点（空轴底座）",
+             "source": {"anchor": anchor_id, "turns": [1, 2]}},
+            {"action": "create", "aspect": "boundary", "parent": "$ROOT",
+             "title": "边界", "gist": "边界轴节点（空轴底座）",
+             "source": {"anchor": anchor_id, "turns": [1, 2]}},
+            {"action": "create", "aspect": "constraint", "parent": "$ROOT",
+             "title": "约束", "gist": "约束轴节点（空轴底座）",
+             "source": {"anchor": anchor_id, "turns": [1, 2]}},
         ]}, ensure_ascii=False), encoding="utf-8")
     main(["plan", str(plan_file)], components=comp)
     out = capsys.readouterr().out
@@ -166,11 +177,14 @@ def test_anchor_distill_plan_confirm_flow(tmp_path, capsys):
     plan.items[0].body = "流程轴正文"
     plan.items[1].summary = "流程摘要"
     plan.items[1].body = "流程正文"
+    for i in (3, 4, 5):                       # 空轴底座也填占位正文
+        plan.items[i].summary = f"{plan.items[i].title}轴摘要"
+        plan.items[i].body = f"{plan.items[i].title}轴正文"
     comp.truth.save_plan(plan)
     # confirm（$ROOT/$AXIS 三段式 + 游标回写 + 计划回写）
     main(["confirm", plan_id], components=comp)
     out = capsys.readouterr().out
-    assert "落库完成" in out and "新建 3 条" in out and "跳过 1 条" in out
+    assert "落库完成" in out and "新建 6 条" in out and "跳过 1 条" in out
     assert f"已更新锚点蒸馏游标: {anchor_id}.distilled_until = 2" in out
     root = comp.search.get("k-0001")
     assert root is not None and root.title == "测试领域" and root.aspect == ""
@@ -178,14 +192,17 @@ def test_anchor_distill_plan_confirm_flow(tmp_path, capsys):
     assert axis_node is not None
     assert axis_node.parents == ["k-0001"]                   # $ROOT → 实际 id
     assert axis_node.aspect == "flow"
-    leaf = comp.search.get("k-0003")
+    assert comp.search.get("k-0003").aspect == "structure"   # 空轴底座落库
+    assert comp.search.get("k-0004").aspect == "boundary"
+    assert comp.search.get("k-0005").aspect == "constraint"
+    leaf = comp.search.get("k-0006")
     assert leaf is not None
     assert leaf.parents == ["k-0002"]                        # $AXIS:flow → 轴节点 id
     assert leaf.aspect == "flow" and leaf.sources[0].turns == [1]
     archived = comp.truth.get_plan(plan_id)
     assert archived.status == "confirmed"
     assert archived.items[0].result_knowledge_id == "k-0002"
-    assert archived.items[1].result_knowledge_id == "k-0003"
+    assert archived.items[1].result_knowledge_id == "k-0006"  # 叶子最后落
     # prepare 之后：增量为空
     main(["distill", anchor_id], components=comp)
     assert "本轮增量 turn 2..2" in capsys.readouterr().out
@@ -213,6 +230,86 @@ def test_plan_rejected_on_bad_coordinates(tmp_path, capsys):
     assert "校验未通过" in out and "锚点不存在" in out
     assert comp.truth.list_plans() == []
     assert comp.truth.get_distill_cursor(anchor_id) == -1
+
+
+# ================= 计划 JSON 结构校验（白名单：未知字段/缺必填/枚举非法） =================
+
+def _submit(comp, tmp_path, capsys, plan_dict) -> str:
+    """写计划文件并提交，返回捕获的输出（SystemExit 由调用方断言）。"""
+    f = tmp_path / "p.json"
+    f.write_text(json.dumps(plan_dict, ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(SystemExit):
+        main(["plan", str(f)], components=comp)
+    return capsys.readouterr().out
+
+
+def test_plan_schema_rejects_unknown_item_field(comp, tmp_path, capsys):
+    """字段拼错（aspects）不再被静默忽略：精确到 items[i] 报错。"""
+    p = tmp_path / "s.jsonl"
+    p.write_text(json.dumps({"message": {"role": "user", "content": "问"}},
+                            ensure_ascii=False), encoding="utf-8")
+    main(["anchor", str(p)], components=comp)
+    anchor_id = re.search(r"锚点已保存: (s-[\d-]+)",
+                          capsys.readouterr().out).group(1)
+    out = _submit(comp, tmp_path, capsys, {
+        "domain_root": {"action": "create", "title": "领域"},
+        "anchor": anchor_id,
+        "items": [{"action": "create", "aspects": "flow",   # 拼错：应为 aspect
+                   "parent": "$ROOT", "title": "流程",
+                   "source": {"anchor": anchor_id, "turns": [1]}}]})
+    assert "结构校验未通过" in out
+    assert "items[0] 未知字段: aspects" in out
+    assert comp.truth.list_plans() == []                   # 未提交、未归档
+
+
+def test_plan_schema_rejects_system_field_in_draft(comp, tmp_path, capsys):
+    """系统管理字段（plan_id/status…）混入手写 draft → 显式拒收。"""
+    p = tmp_path / "s.jsonl"
+    p.write_text(json.dumps({"message": {"role": "user", "content": "问"}},
+                            ensure_ascii=False), encoding="utf-8")
+    main(["anchor", str(p)], components=comp)
+    anchor_id = re.search(r"锚点已保存: (s-[\d-]+)",
+                          capsys.readouterr().out).group(1)
+    out = _submit(comp, tmp_path, capsys, {
+        "mode": "domain", "anchor": anchor_id,
+        "plan_id": "plan-20990101-001",                     # 从归档文件抄来的
+        "domain_root": {"action": "create", "title": "领域"},
+        "items": [{"action": "skip", "gist": "闲聊",
+                   "source": {"anchor": anchor_id, "turns": [1]}}]})
+    assert "系统管理字段不允许出现在 draft: plan_id" in out
+
+
+def test_plan_schema_rejects_missing_action_and_bad_mode(comp, tmp_path, capsys):
+    """缺 action / mode 枚举非法：一次性报全。"""
+    p = tmp_path / "s.jsonl"
+    p.write_text(json.dumps({"message": {"role": "user", "content": "问"}},
+                            ensure_ascii=False), encoding="utf-8")
+    main(["anchor", str(p)], components=comp)
+    anchor_id = re.search(r"锚点已保存: (s-[\d-]+)",
+                          capsys.readouterr().out).group(1)
+    out = _submit(comp, tmp_path, capsys, {
+        "mode": "bogus", "anchor": anchor_id,
+        "domain_root": {"action": "create", "title": "领域"},
+        "items": [{"title": "无 action", "aspect": "flow", "parent": "$ROOT",
+                   "source": {"anchor": anchor_id, "turns": [1]}}]})
+    assert "mode 非法" in out and "'bogus'" in out
+    assert "items[0] 缺 action" in out
+
+
+def test_plan_schema_rejects_missing_source(comp, tmp_path, capsys):
+    p = tmp_path / "s.jsonl"
+    p.write_text(json.dumps({"message": {"role": "user", "content": "问"}},
+                            ensure_ascii=False), encoding="utf-8")
+    main(["anchor", str(p)], components=comp)
+    anchor_id = re.search(r"锚点已保存: (s-[\d-]+)",
+                          capsys.readouterr().out).group(1)
+    out = _submit(comp, tmp_path, capsys, {
+        "anchor": anchor_id,
+        "domain_root": {"action": "create", "title": "领域"},
+        "items": [{"action": "create", "aspect": "flow", "parent": "$ROOT",
+                   "title": "流程"}]})                       # 整个 source 缺失
+    assert "items[0] 缺 source" in out
+    assert comp.truth.list_plans() == []
 
 
 def test_anchor_missing_path(comp, capsys):
