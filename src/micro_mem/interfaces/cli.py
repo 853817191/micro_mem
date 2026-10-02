@@ -11,6 +11,7 @@
     mem anchor [jsonl] [标题]                  会话 jsonl → 保真锚点（缺省取最新会话）
     mem distill [anchor_id] [--domain X]       增量蒸馏准备 / 主题驱动领域盘点
     mem plan <plan.json>                       提交蒸馏计划（校验 + 归档 data/plans/）
+    mem review <plan.json>                     R2 计划审查视图（计划树+依据段，只读）
     mem confirm <plan_id> [--force]            计划落库（硬校验 + $ROOT 两段式 + 游标回写）
     mem serve [--port 8000]                    可视化 HTTP 服务
 
@@ -22,16 +23,19 @@ import json
 import os
 import sys
 
-from ..application.distill_service import DistillService
+from ..application.distill_service import DistillService, ReviewContext
 from ..application.plan_checker import PlanRejectedError
 from ..composition import Components, assemble
 from ..domain.models import (
+    ROOT_PLACEHOLDER,
     DistillPlan,
     Knowledge,
     KnowledgeType,
+    PlanAction,
     Scope,
     Source,
     SourceType,
+    parse_axis_placeholder,
     validate_plan_dict,
 )
 
@@ -368,6 +372,134 @@ def cmd_plan(args, ctx: Components) -> None:
           f"然后运行 mem confirm {plan.plan_id}")
 
 
+# ================= R2 审查视图（mem review，只读闸门） =================
+
+_REVIEW_EXCERPT = 150          # 依据段每轮截断字符数（全文回锚点文件）
+
+
+def _excerpt(text: str) -> str:
+    """turn 原文摘要：折行压平 + 截断（审查核对用，全文在锚点文件）。"""
+    flat = " ".join(text.split())
+    return flat if len(flat) <= _REVIEW_EXCERPT else flat[:_REVIEW_EXCERPT] + "…"
+
+
+def cmd_review(args, ctx: Components) -> None:
+    """review：R2 计划审查视图——结果（计划树）+ 根据（turns 原文），只读。"""
+    try:
+        with open(args.file, encoding="utf-8") as f:
+            raw = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        print(f"计划文件读取失败: {e}")
+        raise SystemExit(1) from e
+    schema_errors = validate_plan_dict(raw)
+    if schema_errors:
+        print("计划文件结构校验未通过：")
+        for err in schema_errors:
+            print(f"  {err}")
+        raise SystemExit(1)
+    plan = DistillPlan.from_dict(raw)
+    _print_review(plan, ctx.distill.review_context(plan),
+                  list(ctx.distill.template_axes(plan.mode.value).keys()))
+
+
+def _print_review_item(item, anchor_turns: dict[int, str], indent: str) -> None:
+    """单个计划项：动作/title/坐标/turns + gist + 依据段。"""
+    turns = ",".join(map(str, item.source_turns)) or "-"
+    axis = f" axis={item.aspect}" if item.aspect else ""
+    parent = f" parent={item.parent}" if item.parent else ""
+    target = f" → {item.edit_id}" if item.edit_id else ""
+    print(f"{indent}[{item.action.value}] {item.title or '（无 title）'}"
+          f"{axis}{parent}{target}  turns[{turns}]")
+    if item.gist:
+        print(f"{indent}  gist: {item.gist}")
+    if not item.source_turns:
+        return
+    print(f"{indent}  依据:")
+    for t in item.source_turns:
+        text = anchor_turns.get(t)
+        if text is None:
+            print(f"{indent}    turn {t}: （锚点无此轮）")
+        else:
+            print(f"{indent}    turn {t}: {_excerpt(text)}")
+
+
+def _print_review(plan: DistillPlan, rctx: ReviewContext,
+                  template_axes: list[str]) -> None:
+    """渲染 R2 审查视图：计划树 + 依据段 + 机械统计（判断归审查者）。"""
+    print(f"【计划审查】driver={plan.driver.value} mode={plan.mode.value}"
+          f" | 锚点 {plan.anchor or '（无，topic 驱动见各项 source.anchor）'}")
+    root = plan.domain_root
+    if root.action == "create":
+        print(f"领域根: {root.title}（create 新领域）")
+    else:
+        title = rctx.node_titles.get(root.id, root.id)
+        print(f"领域根: {title}（existing {root.id}）")
+    # 轴层：create + parent=$ROOT；叶子按 parent 占位/节点 id 归组
+    axes = [i for i in plan.items
+            if i.action is PlanAction.CREATE and i.parent == ROOT_PLACEHOLDER]
+    leaves_by: dict[str, list] = {}
+    for i in plan.items:
+        if i.action is not PlanAction.CREATE or i.parent == ROOT_PLACEHOLDER:
+            continue
+        key = parse_axis_placeholder(i.parent) or i.parent
+        leaves_by.setdefault(key, []).append(i)
+    print("── 计划树 ──")
+    for ax in axes:
+        turns_map = dict(rctx.anchor_turns.get(ax.source_anchor, []))
+        _print_review_item(ax, turns_map, "  ")
+        for leaf in leaves_by.pop(ax.aspect, []):
+            turns_map = dict(rctx.anchor_turns.get(leaf.source_anchor, []))
+            _print_review_item(leaf, turns_map, "      ")
+    for key, group in leaves_by.items():
+        ref = rctx.node_titles.get(key)
+        head = f"{key} {ref}" if ref else f"$AXIS:{key}（引用库中轴）"
+        print(f"  ── 挂库中节点 {head} ──")
+        for leaf in group:
+            turns_map = dict(rctx.anchor_turns.get(leaf.source_anchor, []))
+            _print_review_item(leaf, turns_map, "      ")
+    changed = [i for i in plan.items
+               if i.action in (PlanAction.EDIT, PlanAction.MOVE)]
+    if changed:
+        print("── 变更已有节点 ──")
+        for i in changed:
+            title = rctx.node_titles.get(i.edit_id, "")
+            turns_map = dict(rctx.anchor_turns.get(i.source_anchor, []))
+            _print_review_item(i, turns_map, "  ")
+            if title:
+                print(f"      （目标: {title}）")
+    skips = [i for i in plan.items if i.action is PlanAction.SKIP]
+    if skips:
+        print(f"── 跳过（{len(skips)} 条）──")
+        for i in skips:
+            turns = ",".join(map(str, i.source_turns)) or "-"
+            print(f"  turns[{turns}]  {i.gist}")
+            turns_map = dict(rctx.anchor_turns.get(i.source_anchor, []))
+            for t in i.source_turns:
+                text = turns_map.get(t)
+                if text is not None:
+                    print(f"    turn {t}: {_excerpt(text)}")
+    print("── 机械统计 ──")
+    delta, covered = rctx.delta_turns, rctx.covered_turns
+    if delta:
+        missing = [t for t in delta if t not in covered]
+        state = (f"缺 {missing}（未覆盖）" if missing
+                 else f"turn {delta[0]}..{delta[-1]} 全覆盖")
+        print(f"覆盖: {len(covered)}/{len(delta)} 轮（{state}）")
+    else:
+        print(f"覆盖: {len(covered)} 轮（topic 驱动无增量基线）")
+    if plan.domain_root.action == "create" and template_axes:
+        present = {i.aspect for i in axes}
+        missing_axes = [a for a in template_axes if a not in present]
+        state = "齐全" if not missing_axes else f"缺 {missing_axes}"
+        print(f"轴建齐: {len(present & set(template_axes))}"
+              f"/{len(template_axes)}（{state}）")
+    counts: dict[str, int] = {}
+    for i in plan.items:
+        counts[i.action.value] = counts.get(i.action.value, 0) + 1
+    print("动作: " + " / ".join(f"{k} {counts[k]}" for k in
+                                ("create", "edit", "move", "skip") if k in counts))
+
+
 def cmd_confirm(args, ctx: Components) -> None:
     """confirm：计划落库（硬校验 + $ROOT 两段式 + 轮次级溯源 + 游标回写 + 计划回写）。"""
     try:
@@ -476,6 +608,10 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("plan", help="提交蒸馏计划（校验 + 归档）")
     p.add_argument("file", help="计划 JSON 文件路径（AI 手写的 draft）")
     p.set_defaults(func=cmd_plan)
+
+    p = sub.add_parser("review", help="R2 计划审查视图（计划树+依据段，只读）")
+    p.add_argument("file", help="计划 JSON 文件路径（提交前审查用）")
+    p.set_defaults(func=cmd_review)
 
     p = sub.add_parser("confirm", help="蒸馏计划落库")
     p.add_argument("plan_id", help="已归档的计划 id（plan-<yyyymmdd>-<seq>）")

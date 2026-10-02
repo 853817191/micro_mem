@@ -90,6 +90,20 @@ class DomainDistillContext:
     candidates: list[NodeRecord] = field(default_factory=list)   # 未定位时的候选领域根
 
 
+@dataclass
+class ReviewContext:
+    """mem review 的素材：R2 审查视图渲染所需的锚点原文与机械统计（只读）。
+
+    R2 审查"结果 + 根据"：结果=计划树（CLI 渲染），根据=标注 turns 的原文摘录；
+    判断理由（为什么这么切）不写进契约——那是审查者的判断输入，不是 R1 的产出物。
+    """
+    delta_turns: list[int]                              # 增量轮次全集（session 驱动）
+    covered_turns: list[int]                            # 计划项 turns 并集（排序去重）
+    anchor_turns: dict[str, list[tuple[int, str]]] = field(default_factory=dict)
+    # 计划引用的已有节点 id → title（parent 坐标 / edit/move 目标 / existing 根）
+    node_titles: dict[str, str] = field(default_factory=dict)
+
+
 class DistillService:
     """蒸馏服务：锚点保真 → 增量准备 → 计划提交与落库。"""
 
@@ -298,6 +312,37 @@ class DistillService:
         """按模式解析轴模板（无配置或空 → 兜底默认模板），供校验与供给视图使用。"""
         return resolve_template(self._templates, mode)
 
+    # ================= 二段半：R2 审查素材（只读，不动真值不推游标） =================
+
+    def review_context(self, plan: DistillPlan) -> ReviewContext:
+        """R2 审查素材：计划引用的锚点 turn 原文 + 已有节点 title + 覆盖统计。
+
+        锚点自足（D3）：原文只认锚点正文。多锚点计划（topic 驱动项级 anchor
+        可不同）逐个解析。节点不存在时 title 记"（不存在）"——审查者要看到。
+        """
+        anchor_turns: dict[str, list[tuple[int, str]]] = {}
+        anchor_ids = {plan.anchor} | {i.source_anchor for i in plan.items
+                                      if i.source_anchor}
+        anchor_ids.discard("")
+        for aid in sorted(anchor_ids):
+            a = self._truth.get_anchor(aid)
+            if a is not None:
+                anchor_turns[aid] = parse_anchor_turns(a.content)
+        node_ids = {plan.domain_root.id} | {
+            item.parent for item in plan.items
+            if item.parent and item.parent != ROOT_PLACEHOLDER
+            and parse_axis_placeholder(item.parent) is None
+        } | {item.edit_id for item in plan.items if item.edit_id}
+        node_ids.discard("")
+        node_titles: dict[str, str] = {}
+        for nid in sorted(node_ids):
+            k = self._truth.get_knowledge(nid)
+            node_titles[nid] = k.title if k is not None else "（不存在）"
+        covered = sorted({t for item in plan.items for t in item.source_turns})
+        return ReviewContext(delta_turns=self._expected_turns(plan),
+                             covered_turns=covered,
+                             anchor_turns=anchor_turns,
+                             node_titles=node_titles)
     # ================= 三段：计划提交（R2 批准动作） =================
 
     def submit_plan(self, plan: DistillPlan) -> tuple[DistillPlan, list[CheckIssue]]:

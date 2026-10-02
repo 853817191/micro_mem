@@ -312,6 +312,89 @@ def test_plan_schema_rejects_missing_source(comp, tmp_path, capsys):
     assert comp.truth.list_plans() == []
 
 
+# ================= R2 审查视图（mem review：计划树 + 依据段，只读） =================
+
+def test_review_renders_tree_and_evidence(comp, tmp_path, capsys):
+    """审查视图：计划树（根→轴→叶子）+ gist + 依据段 + 跳过区 + 机械统计。"""
+    p = tmp_path / "s.jsonl"
+    p.write_text("\n".join(
+        json.dumps({"message": {"role": "user", "content": f"第{i}轮内容" }},
+                   ensure_ascii=False) for i in range(1, 3)), encoding="utf-8")
+    main(["anchor", str(p)], components=comp)
+    anchor_id = re.search(r"锚点已保存: (s-[\d-]+)",
+                          capsys.readouterr().out).group(1)
+    plan_file = tmp_path / "plan.json"
+    plan_file.write_text(json.dumps({
+        "driver": "session", "mode": "domain",
+        "domain_root": {"action": "create", "title": "测试领域"},
+        "anchor": anchor_id,
+        "items": [
+            {"action": "create", "aspect": "flow", "parent": "$ROOT",
+             "title": "流程", "gist": "建流程轴",
+             "source": {"anchor": anchor_id, "turns": [1]}},
+            {"action": "create", "aspect": "flow", "parent": "$AXIS:flow",
+             "title": "第一轮流程", "gist": "第1轮流程知识",
+             "source": {"anchor": anchor_id, "turns": [1]}},
+            {"action": "create", "aspect": "structure", "parent": "$ROOT",
+             "title": "结构", "gist": "结构轴（空轴底座：已逐轮检查）",
+             "source": {"anchor": anchor_id, "turns": [1, 2]}},
+            {"action": "skip", "gist": "第2轮是闲聊",
+             "source": {"anchor": anchor_id, "turns": [2]}},
+        ]}, ensure_ascii=False), encoding="utf-8")
+    main(["review", str(plan_file)], components=comp)
+    out = capsys.readouterr().out
+    assert "【计划审查】driver=session mode=domain" in out
+    assert f"锚点 {anchor_id}" in out
+    assert "领域根: 测试领域（create 新领域）" in out
+    assert "── 计划树 ──" in out
+    assert "[create] 流程 axis=flow" in out                  # 轴层
+    assert "[create] 第一轮流程 axis=flow" in out            # 叶子层（归组在 flow 下）
+    assert "gist: 建流程轴" in out
+    assert "依据:" in out and "turn 1: ## user 第1轮内容" in out  # 原文摘录
+    assert "── 跳过（1 条）──" in out and "第2轮是闲聊" in out
+    assert "覆盖: 2/2 轮（turn 1..2 全覆盖）" in out
+    assert "轴建齐: 2/4（缺 ['boundary', 'constraint']）" in out
+    assert "动作: create 3 / skip 1" in out
+    assert comp.truth.list_plans() == []                   # 只读：不归档
+
+
+def test_review_schema_error_blocks_render(comp, tmp_path, capsys):
+    """结构不合法的计划：review 同样挡在白名单，不渲染。"""
+    f = tmp_path / "bad.json"
+    f.write_text(json.dumps({
+        "anchor": "s-1", "domain_root": {"action": "create", "title": "x"},
+        "items": [{"action": "create", "aspects": "flow",
+                   "source": {"anchor": "s-1"}}],
+    }, ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(SystemExit):
+        main(["review", str(f)], components=comp)
+    out = capsys.readouterr().out
+    assert "结构校验未通过" in out and "未知字段: aspects" in out
+
+
+def test_review_missing_coverage_shown(comp, tmp_path, capsys):
+    """漏轮次在机械统计里显形（R2 一眼看到覆盖缺口）。"""
+    p = tmp_path / "s.jsonl"
+    p.write_text("\n".join(
+        json.dumps({"message": {"role": "user", "content": f"第{i}轮" }},
+                   ensure_ascii=False) for i in range(1, 3)), encoding="utf-8")
+    main(["anchor", str(p)], components=comp)
+    anchor_id = re.search(r"锚点已保存: (s-[\d-]+)",
+                          capsys.readouterr().out).group(1)
+    plan_file = tmp_path / "plan.json"
+    plan_file.write_text(json.dumps({
+        "anchor": anchor_id,
+        "domain_root": {"action": "create", "title": "测试领域"},
+        "items": [{"action": "create", "aspect": "flow", "parent": "$ROOT",
+                   "title": "流程", "gist": "g",
+                   "source": {"anchor": anchor_id, "turns": [1]}}],  # 漏了 turn 2
+    }, ensure_ascii=False), encoding="utf-8")
+    main(["review", str(plan_file)], components=comp)
+    out = capsys.readouterr().out
+    assert "覆盖: 1/2 轮（缺 [2]（未覆盖））" in out
+    assert "轴建齐: 1/4" in out
+
+
 def test_anchor_missing_path(comp, capsys):
     with pytest.raises(SystemExit):
         main(["anchor", "nonexistent.jsonl"], components=comp)
